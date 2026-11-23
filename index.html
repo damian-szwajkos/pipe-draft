@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PipeDraft</title>
+  <meta name="description" content="Dry-run Jenkins pipelines in the browser: see which stages run, when, and why.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M7 16h5m8 0h5M12 11h8v10h-8z' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="26" height="26"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M7 16h5m8 0h5M12 11h8v10h-8z" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>
+      </span>
+      <span class="name">PipeDraft</span>
+      <span class="tag">Jenkins pipeline dry-run</span>
+    </div>
+    <div class="top-actions">
+      <label class="select-wrap">
+        <span class="sr">Example</span>
+        <select id="example"></select>
+      </label>
+      <button id="share" class="btn" type="button" title="Copy a link with this Jenkinsfile and its contexts">Share link</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="pane editor-pane" aria-label="Jenkinsfile editor">
+      <div class="pane-head">
+        <span class="file">Jenkinsfile</span>
+        <span id="mode" class="chip"></span>
+        <span id="validity" class="validity"></span>
+      </div>
+      <div id="editor" class="editor"></div>
+      <div class="problems">
+        <div class="problems-head">
+          <span>Problems</span>
+          <span id="problem-count" class="count"></span>
+        </div>
+        <ul id="problems" class="problem-list"></ul>
+      </div>
+    </section>
+
+    <section class="pane run-pane" aria-label="Simulated runs">
+      <div class="ctx-bar">
+        <span class="ctx-label">Run context</span>
+        <div id="contexts" class="ctx-chips" role="tablist"></div>
+        <div class="ctx-actions">
+          <button id="ctx-add" class="btn small" type="button" title="Add a run context">+ Context</button>
+          <button id="ctx-suggest" class="btn small ghost" type="button" title="Add contexts that flip the conditions in this pipeline">Suggest from conditions</button>
+        </div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab" data-tab="pipeline" type="button">Stages</button>
+        <button class="tab" data-tab="matrix" type="button">Condition matrix</button>
+        <button class="tab" data-tab="log" type="button">Console log</button>
+        <div id="run-summary" class="run-summary"></div>
+      </div>
+      <div class="tab-body">
+        <div id="tab-pipeline" class="tab-panel">
+          <div id="graph" class="graph"></div>
+          <div id="details" class="details"></div>
+        </div>
+        <div id="tab-matrix" class="tab-panel"><div id="matrix" class="matrix-wrap"></div></div>
+        <div id="tab-log" class="tab-panel"><pre id="log" class="log"></pre></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="ctx-dialog" class="dialog">
+    <form id="ctx-form" method="dialog"></form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="src/ui/app.js"></script>
+</body>
+</html>
