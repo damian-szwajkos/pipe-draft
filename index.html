@@ -3,78 +3,341 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PipeDraft</title>
-  <meta name="description" content="Dry-run Jenkins pipelines in the browser: see which stages run, when, and why.">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M7 16h5m8 0h5M12 11h8v10h-8z' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css">
+  <title>PipeDraft · Dry-run Jenkins pipelines in your browser</title>
+  <meta name="description" content="Paste a Jenkinsfile and see which stages run, when and why, for every kind of build: a push to main, a pull request, a tag or a failing test. Syntax checks like Jenkins' validator, mocked commands, no Jenkins needed. Open source, runs in your browser.">
+  <meta name="theme-color" content="#0a0b0d">
+  <meta property="og:title" content="PipeDraft">
+  <meta property="og:description" content="Write a Jenkinsfile. See every build before it runs. A browser-only Jenkins pipeline dry-run.">
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="site.css">
+  <script>document.documentElement.classList.add('js')</script>
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <span class="logo" aria-hidden="true">
-        <svg viewBox="0 0 32 32" width="26" height="26"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M7 16h5m8 0h5M12 11h8v10h-8z" stroke="#fff" stroke-width="2.5" fill="none" stroke-linecap="round"/></svg>
-      </span>
-      <span class="name">PipeDraft</span>
-      <span class="tag">Jenkins pipeline dry-run</span>
-    </div>
-    <div class="top-actions">
-      <label class="select-wrap">
-        <span class="sr">Example</span>
-        <select id="example"></select>
-      </label>
-      <button id="share" class="btn" type="button" title="Copy a link with this Jenkinsfile and its contexts">Share link</button>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="PipeDraft home">
+        <svg class="logo pd-logo" viewBox="0 0 24 24" aria-hidden="true"><circle cx="4.5" cy="12" r="2.2"/><circle cx="19.5" cy="6.5" r="2.2"/><circle cx="19.5" cy="17.5" r="2.2"/><path d="M6.7 12h4.3M11 12c2.4 0 2.6-5.5 6.3-5.5M11 12c2.4 0 2.6 5.5 6.3 5.5"/></svg>
+        <span>PipeDraft</span>
+      </a>
+      <nav class="nav-links" aria-label="Main">
+        <a href="#examples"><span class="txt">Examples</span></a>
+        <a href="play.html"><span class="txt">Playground</span></a>
+        <a class="gh" href="https://github.com/damian-szwajkos/pipe-draft" aria-label="PipeDraft on GitHub">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.540 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.230.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.020.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        </a>
+        <a class="btn sm primary" href="play.html">Open<span class="long">&nbsp;the playground</span></a>
+      </nav>
     </div>
   </header>
 
-  <main class="layout">
-    <section class="pane editor-pane" aria-label="Jenkinsfile editor">
-      <div class="pane-head">
-        <span class="file">Jenkinsfile</span>
-        <span id="mode" class="chip"></span>
-        <span id="validity" class="validity"></span>
-      </div>
-      <div id="editor" class="editor"></div>
-      <div class="problems">
-        <div class="problems-head">
-          <span>Problems</span>
-          <span id="problem-count" class="count"></span>
+  <main id="main">
+    <!-- ============================================================ hero -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="wrap">
+        <span class="pill rise"><i></i>Open source <span class="sep">·</span> runs in your browser</span>
+        <h1 id="hero-title" class="rise" style="--d:60ms">Write a Jenkinsfile.<span class="l2">See every build before it runs.</span></h1>
+        <p class="sub rise" style="--d:120ms">PipeDraft dry-runs your pipeline for a push to main, a pull request, a tag or a failing test, and shows which stages run, which are skipped, and why.</p>
+        <div class="cta-row rise" style="--d:180ms">
+          <a class="btn primary" href="play.html">Open the playground
+            <svg class="ico arr" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          <a class="btn" href="#examples">Browse examples</a>
         </div>
-        <ul id="problems" class="problem-list"></ul>
+        <p class="hero-note rise" style="--d:220ms">No Jenkins. No agents. Nothing to install.</p>
+
+        <div class="showcase rise" style="--d:260ms">
+          <div class="glow" aria-hidden="true"></div>
+          <figure class="window" style="margin:0">
+            <div class="win-bar">
+              <div class="dots" aria-hidden="true"><i></i><i></i><i></i></div>
+              <span class="win-title">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                Jenkinsfile
+              </span>
+              <a class="win-open" href="play.html">Open full screen
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6M20 4l-8 8M18 14v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4"/></svg></a>
+            </div>
+            <div class="stage" id="stage">
+              <template id="stageFrame">
+                <iframe src="play.html?embed=1&amp;example=multibranch" loading="lazy" title="PipeDraft playground" tabindex="-1"></iframe>
+              </template>
+              <button class="stage-cover" id="stageCover" type="button" aria-label="Try the playground here">
+                <span><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5l12 7.5-12 7.5z"/></svg>Click to try it here</span>
+              </button>
+            </div>
+            <div class="fallback">
+              <pre class="fb-code" aria-hidden="true"><span class="k">stage</span>(<span class="s">'Deploy to staging'</span>) {
+    <span class="k">when</span> { <span class="k">branch</span> <span class="s">'main'</span> }
+    <span class="k">steps</span> { sh <span class="s">'helm upgrade …'</span> }
+}
+<span class="c">// PR-42 → skipped: BRANCH_NAME is 'PR-42'</span></pre>
+              <p>The playground needs a wider screen. Open it on a laptop, or take a look from here.</p>
+              <a class="btn" href="play.html">Open the playground</a>
+            </div>
+            <figcaption class="sr-only">The PipeDraft playground running a multibranch pipeline: a Jenkinsfile editor next to the stage graph of a simulated build.</figcaption>
+          </figure>
+        </div>
       </div>
     </section>
 
-    <section class="pane run-pane" aria-label="Simulated runs">
-      <div class="ctx-bar">
-        <span class="ctx-label">Run context</span>
-        <div id="contexts" class="ctx-chips" role="tablist"></div>
-        <div class="ctx-actions">
-          <button id="ctx-add" class="btn small" type="button" title="Add a run context">+ Context</button>
-          <button id="ctx-suggest" class="btn small ghost" type="button" title="Add contexts that flip the conditions in this pipeline">Suggest from conditions</button>
+    <!-- ============================================================ band -->
+    <section class="band" aria-labelledby="band-title">
+      <div class="wrap">
+        <h2 class="eyebrow" id="band-title">What it understands</h2>
+        <ul class="chips" role="list" style="list-style:none;margin:0;padding:0">
+          <li class="chip">stages</li><li class="chip">when</li><li class="chip">parallel</li><li class="chip">matrix</li>
+          <li class="chip">post</li><li class="chip">input</li><li class="chip">parameters</li><li class="chip">credentials</li>
+          <li class="chip">retry &amp; timeout</li><li class="chip">catchError</li><li class="chip">scripted node { }</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ============================================================ how it works -->
+    <section class="sec" aria-labelledby="how-title">
+      <div class="wrap">
+        <div class="sec-head" data-reveal>
+          <span class="eyebrow">How it works</span>
+          <h2 id="how-title">A build you can see inside.</h2>
+          <p>A Jenkinsfile is code with conditions in it. PipeDraft runs that code against the builds you care about, so the cause and the effect sit on the same screen.</p>
+        </div>
+        <ol class="steps" role="list" style="list-style:none;margin:0;padding:0">
+          <li class="step" data-reveal style="--d:0ms">
+            <div class="step-n"><b>1.0</b> Paste</div>
+            <h3>Bring your Jenkinsfile</h3>
+            <p>Declarative or scripted. Syntax and structure are checked as you type, the way Jenkins checks them before a build starts.</p>
+          </li>
+          <li class="step" data-reveal style="--d:60ms">
+            <div class="step-n"><b>2.0</b> Describe</div>
+            <h3>Pick the builds</h3>
+            <p>A push to main, PR #42, tag v1.2.0, the nightly cron run. Each context sets the branch, changed files, parameters and cause.</p>
+          </li>
+          <li class="step" data-reveal style="--d:120ms">
+            <div class="step-n"><b>3.0</b> Run</div>
+            <h3>Press Run</h3>
+            <p>Every build is simulated at once. Commands are mocked and succeed, unless you add a rule that makes one fail.</p>
+          </li>
+          <li class="step" data-reveal style="--d:180ms">
+            <div class="step-n"><b>4.0</b> Read</div>
+            <h3>See why</h3>
+            <p>Click a stage: the <code>when</code> conditions, their values in this build, the steps that ran and the post blocks that fired.</p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- ============================================================ features -->
+    <section class="sec" aria-labelledby="feat-title">
+      <div class="wrap">
+        <div class="sec-head" data-reveal>
+          <span class="eyebrow">Features</span>
+          <h2 id="feat-title">Answers before you push.</h2>
+          <p>The questions people otherwise answer by pushing a commit and waiting for an executor.</p>
+        </div>
+
+        <div class="features">
+          <!-- (a) structure checks -->
+          <article class="feat" data-reveal>
+            <div class="feat-vis" id="fixDemo">
+              <div class="code" aria-hidden="true">
+                <div class="ln"><span class="g">14</span><span>    <span class="k">stage</span>(<span class="s">'Deploy'</span>) {</span></div>
+                <div class="ln err" data-line><span class="g">15</span><span>        <span class="k">when</span> { <span class="squig" data-field>branches</span> <span class="s">'main'</span> }</span></div>
+                <div class="ln"><span class="g">16</span><span>        <span class="k">steps</span> {</span></div>
+                <div class="ln"><span class="g">17</span><span>            sh <span class="s">'./deploy.sh'</span></span></div>
+                <div class="ln"><span class="g">18</span><span>        }</span></div>
+              </div>
+              <div class="problem" role="group" aria-label="Example problem">
+                <div class="pb-head">
+                  <span class="pb-dot" data-dot><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg></span>
+                  <span class="pb-msg" data-msg>Unknown conditional <code>branches</code>. Did you mean <code>branch</code>?</span>
+                </div>
+                <div class="pb-meta">
+                  <span class="mono" data-meta>stage Deploy · line 15</span>
+                  <button class="fix-btn" type="button" data-fix><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 4V2M15 10V8M11 6h2M17 6h2M3 21l11-11"/></svg>Fix</button>
+                </div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>Checks like Jenkins' <code>declarative-linter</code></h3>
+              <p>Steps outside <code>steps { }</code>, Groovy that needs <code>script { }</code>, unknown conditions, duplicate stages and broken cron specs are caught as you type, with the message Jenkins would print.</p>
+            </div>
+          </article>
+
+          <!-- (b) why skipped -->
+          <article class="feat" data-reveal style="--d:60ms">
+            <div class="feat-vis">
+              <div class="why" aria-hidden="true">
+                <div class="why-head"><span class="why-st">skipped</span><b>Deploy to staging</b><span class="why-ctx">Pull request #42</span></div>
+                <div class="why-row f"><i>✕</i><code>branch is 'main'</code><span>BRANCH_NAME = 'PR-42'</span></div>
+                <div class="why-note">Pull request builds use <code>PR-42</code> as BRANCH_NAME. Use <code>changeRequest target: 'main'</code> to match the target branch.</div>
+                <div class="why-row t"><i>✓</i><code>changeRequest target: 'main'</code><span>CHANGE_TARGET = 'main'</span></div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>“Why was this stage skipped?”</h3>
+              <p>Each <code>when</code> condition is shown with its value in this build. That includes the subtle ones: <code>beforeAgent</code>, a pull request's <code>BRANCH_NAME</code>, the first build of a branch, which has no changeset.</p>
+            </div>
+          </article>
+
+          <!-- (c) matrix -->
+          <article class="feat" data-reveal>
+            <div class="feat-vis">
+              <div class="cmx" aria-hidden="true">
+                <div class="cmx-r h"><span></span><span>main</span><span>PR</span><span>tag</span><span>cron</span></div>
+                <div class="cmx-r"><span>Build</span><b class="ok">✓</b><b class="ok">✓</b><b class="ok">✓</b><b class="ok">✓</b></div>
+                <div class="cmx-r"><span>Tests</span><b class="ok">✓</b><b class="ok">✓</b><b class="ok">✓</b><b class="ok">✓</b></div>
+                <div class="cmx-r"><span>Docker image</span><b class="ok">✓</b><b class="sk">–</b><b class="ok">✓</b><b class="ok">✓</b></div>
+                <div class="cmx-r"><span>Deploy staging</span><b class="ok">✓</b><b class="sk">–</b><b class="sk">–</b><b class="ok">✓</b></div>
+                <div class="cmx-r"><span>Deploy prod</span><b class="sk">–</b><b class="sk">–</b><b class="ok">✓</b><b class="sk">–</b></div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>Every build, side by side</h3>
+              <p>The condition matrix runs the pipeline for each context and lays the outcomes out as stages × builds. Spot the stage that never runs, or the deploy that runs on every PR.</p>
+            </div>
+          </article>
+
+          <!-- (d) mocks -->
+          <article class="feat" data-reveal style="--d:60ms">
+            <div class="feat-vis">
+              <div class="term" aria-hidden="true">
+                <div class="term-bar"><div class="dots"><i></i><i></i><i></i></div><span>console · Tests fail on main</span></div>
+<pre><span class="h">[Pipeline] sh</span>
+<span class="cmd">+ git rev-parse --short HEAD</span>
+a1b2c3d
+<span class="h">[Pipeline] sh</span>
+<span class="cmd">+ ./gradlew test</span>
+<span class="err">OrderServiceTest &gt; totals FAILED</span>       <span class="p">← mock rule</span>
+<span class="err">ERROR: script returned exit code 1</span>
+<span class="h">Stage "Deploy" skipped due to earlier failure(s)</span></pre>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>Mocks, not machines</h3>
+              <p>Every command succeeds and git returns plausible output. Add a rule like “<code>gradlew test</code> exits 1” or “fails the first time only”, then watch <code>retry</code>, <code>catchError</code> and <code>post { failure }</code> respond.</p>
+            </div>
+          </article>
+
+          <article class="feat sm" data-reveal>
+            <div class="feat-vis">
+              <div class="mini" aria-hidden="true">
+                <div class="url">
+                  <svg class="ico" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg>
+                  <span><b>play.html</b>#p=jZPBbtswDIbvfQoix6Gw4zRpOyCH7TIMu-62w1DIEh0LkSVBkp0YQ</span>
+                  <em>Copy</em>
+                </div>
+                <div class="mini-note">Jenkinsfile + contexts, deflate-compressed · no server involved</div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>Shareable in a link</h3>
+              <p>The Jenkinsfile and its run contexts are compressed into the URL itself. Paste it in a review or a ticket.</p>
+            </div>
+          </article>
+
+          <article class="feat sm" data-reveal style="--d:60ms">
+            <div class="feat-vis">
+              <div class="mini" aria-hidden="true">
+                <div class="lock">
+                  <span class="tile"><svg class="ico" viewBox="0 0 24 24"><path d="M12 3l7.5 3v5.5c0 4.6-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.9-7.5-9.5V6z"/><path d="M8.8 12.2l2.2 2.2 4.2-4.4"/></svg></span>
+                  <div class="net"><span>requests to a backend: <b>0</b></span><span>credentials needed: <b>0</b></span><span>Jenkins controllers: <b>0</b></span></div>
+                </div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>Nothing leaves the browser</h3>
+              <p>It is a static web page. Your Jenkinsfile is parsed and simulated on your device, and secrets are only ever placeholders.</p>
+            </div>
+          </article>
         </div>
       </div>
-      <div class="tabs" role="tablist">
-        <button class="tab" data-tab="pipeline" type="button">Stages</button>
-        <button class="tab" data-tab="matrix" type="button">Condition matrix</button>
-        <button class="tab" data-tab="log" type="button">Console log</button>
-        <div id="run-summary" class="run-summary"></div>
-      </div>
-      <div class="tab-body">
-        <div id="tab-pipeline" class="tab-panel">
-          <div id="graph" class="graph"></div>
-          <div id="details" class="details"></div>
+    </section>
+
+    <!-- ============================================================ examples -->
+    <section class="sec" id="examples" aria-labelledby="ex-title">
+      <div class="wrap">
+        <div class="sec-head row" data-reveal>
+          <div>
+            <span class="eyebrow">Examples</span>
+            <h2 id="ex-title">Start from a real pipeline.</h2>
+            <p>Each example comes with its own run contexts, chosen to show where the pipeline's conditions surprise people.</p>
+          </div>
+          <a class="link" href="play.html">Open the playground
+            <svg class="ico arr" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
         </div>
-        <div id="tab-matrix" class="tab-panel"><div id="matrix" class="matrix-wrap"></div></div>
-        <div id="tab-log" class="tab-panel"><pre id="log" class="log"></pre></div>
+        <div class="grid" id="examplesGrid"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ FAQ -->
+    <section class="sec" aria-labelledby="faq-title">
+      <div class="wrap">
+        <div class="sec-head" data-reveal>
+          <span class="eyebrow">FAQ</span>
+          <h2 id="faq-title">Questions, answered plainly.</h2>
+        </div>
+        <div class="faq" data-reveal>
+          <details>
+            <summary>Does it run Jenkins?<span class="chev" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></span></summary>
+            <div class="ans"><p>No. PipeDraft has its own Groovy parser and interpreter and a model of how declarative pipelines run: the <code>when</code> evaluation order, “skipped due to earlier failure(s)”, parallel branches and <code>failFast</code>, matrix cells, and the order of <code>post</code> conditions. It is a model you can learn from and test against. It does not replace a real build.</p></div>
+          </details>
+          <details>
+            <summary>What happens to sh, docker and deploy commands?<span class="chev" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></span></summary>
+            <div class="ans"><p>Nothing is executed. Every command is mocked and succeeds, and git commands return plausible output. A mock rule in a run context makes a command fail, return specific output, or fail only the first N times.</p></div>
+          </details>
+          <details>
+            <summary>What about shared libraries and plugins?<span class="chev" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></span></summary>
+            <div class="ans"><p>Common plugin steps are built in: credentials, docker, junit, input, slackSend, httpRequest, build and more. Steps PipeDraft does not know, including those from a <code>@Library</code>, are mocked as successful no-ops and flagged, so you can see where they are called. The limits are listed in the <a href="https://github.com/damian-szwajkos/pipe-draft#readme">README</a>.</p></div>
+          </details>
+          <details>
+            <summary>Why is there a Run button instead of live results?<span class="chev" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></span></summary>
+            <div class="ans"><p>Syntax and structure checks are live, because they are cheap and you want them while you type. A run simulates every context at once and animates the build, so you decide when it happens: press Run or <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>. If you prefer live results, switch on Auto-run.</p></div>
+          </details>
+          <details>
+            <summary>Does my Jenkinsfile leave my browser?<span class="chev" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></span></summary>
+            <div class="ans"><p>No. Everything runs on your device and there is no backend. The only exception is a share link you create yourself: it contains your Jenkinsfile, compressed into the URL.</p></div>
+          </details>
+          <details>
+            <summary>Is it free and open source?<span class="chev" aria-hidden="true"><svg class="ico" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5"/></svg></span></summary>
+            <div class="ans"><p>Yes, both. The code is on <a href="https://github.com/damian-szwajkos/pipe-draft">GitHub</a>. Issues, examples and corrections are welcome.</p></div>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ final CTA -->
+    <section class="wrap" aria-labelledby="final-title">
+      <div class="final" data-reveal>
+        <svg class="logo pd-logo" viewBox="0 0 24 24" aria-hidden="true"><circle cx="4.5" cy="12" r="2.2"/><circle cx="19.5" cy="6.5" r="2.2"/><circle cx="19.5" cy="17.5" r="2.2"/><path d="M6.7 12h4.3M11 12c2.4 0 2.6-5.5 6.3-5.5M11 12c2.4 0 2.6 5.5 6.3 5.5"/></svg>
+        <h2 id="final-title">Break the build.<br>Nothing breaks.</h2>
+        <p>Paste a Jenkinsfile or start from an example. Your first dry run takes a few seconds.</p>
+        <div class="cta-row">
+          <a class="btn primary" href="play.html">Open the playground
+            <svg class="ico arr" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+          <a class="btn" href="#examples">Browse examples</a>
+        </div>
       </div>
     </section>
   </main>
 
-  <dialog id="ctx-dialog" class="dialog">
-    <form id="ctx-form" method="dialog"></form>
-  </dialog>
+  <footer class="foot">
+    <div class="wrap">
+      <a class="brand" href="./" aria-label="PipeDraft home">
+        <svg class="logo pd-logo" viewBox="0 0 24 24" aria-hidden="true"><circle cx="4.5" cy="12" r="2.2"/><circle cx="19.5" cy="6.5" r="2.2"/><circle cx="19.5" cy="17.5" r="2.2"/><path d="M6.7 12h4.3M11 12c2.4 0 2.6-5.5 6.3-5.5M11 12c2.4 0 2.6 5.5 6.3 5.5"/></svg>
+        <span>PipeDraft</span>
+      </a>
+      <nav aria-label="Footer">
+        <a href="#examples">Examples</a>
+        <a href="play.html">Playground</a>
+        <a href="https://github.com/damian-szwajkos/pipe-draft">GitHub</a>
+      </nav>
+      <div class="sib"><span>Built alongside ArchDraft, CloudDraft and KubeDraft.</span><span class="mono">Open source · runs in your browser</span></div>
+    </div>
+  </footer>
 
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
-  <script type="module" src="src/ui/app.js"></script>
+  <script type="module" src="src/site/landing.js"></script>
 </body>
 </html>

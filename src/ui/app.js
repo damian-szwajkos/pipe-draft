@@ -4,7 +4,7 @@ import { analyze, simulate, flattenView, fmtDur } from '../engine/engine.js';
 import { presetContexts, normalizeContext, suggestContexts, newId, CAUSES } from '../engine/contexts.js';
 import { EXAMPLES } from '../examples.js';
 import { createEditor } from './editor.js';
-import { renderGraph } from './graph.js';
+import { renderGraph, timedStatus } from './graph.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -20,23 +20,39 @@ const state = {
   activeCtx: null,
   tab: 'pipeline',
   selected: null,
+  autorun: false,
 };
+// Live: re-analysed (syntax + structure checks) on every edit.
 let analysis = null;
-let runs = new Map();
+// The last run: results for every context, and the analysis they were computed from.
+let ran = null;
+// True when the Jenkinsfile or the contexts changed after the last run.
+let dirty = true;
+// Playback of the active context's run: { ctxId, t, total, wall, t0, raf, sig }.
+let anim = null;
+let celebrate = false;
 let engineError = null;
 let timer = null;
+
+const query = new URLSearchParams(location.search);
+const embed = query.has('embed');
+const exampleParam = query.get('example');
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+if (embed) document.body.classList.add('embed');
 
 // ------------------------------------------------------------------ persistence
 
 function save() {
+  if (embed) return;
   try {
     localStorage.setItem(STORE_KEY, JSON.stringify({
-      source: state.source, exampleId: state.exampleId, pristine: state.pristine, contexts: state.contexts, activeCtx: state.activeCtx, tab: state.tab,
+      source: state.source, exampleId: state.exampleId, pristine: state.pristine, contexts: state.contexts, activeCtx: state.activeCtx, tab: state.tab, autorun: state.autorun,
     }));
   } catch { /* storage unavailable */ }
 }
 
 function loadStored() {
+  if (embed) return null;
   try {
     const raw = localStorage.getItem(STORE_KEY);
     return raw ? JSON.parse(raw) : null;
@@ -68,9 +84,9 @@ function toast(msg) {
 
 // ------------------------------------------------------------------ analysis & runs
 
-function recompute() {
+/** Live syntax and structure checks. Does not run anything. */
+function reanalyze() {
   engineError = null;
-  runs = new Map();
   try {
     analysis = analyze(state.source);
   } catch (e) {
@@ -78,29 +94,118 @@ function recompute() {
     analysis = null;
     engineError = e;
   }
-  if (analysis && isValid()) {
-    for (const ctx of state.contexts) {
-      try {
-        runs.set(ctx.id, simulate(analysis, ctx));
-      } catch (e) {
-        console.error(e);
-        runs.set(ctx.id, { crash: e });
-      }
-    }
-  }
-  render();
 }
 
 function isValid() {
   return analysis && analysis.ok && !analysis.diagnostics.some((d) => d.severity === 'error');
 }
 
+/** The source changed: re-check it now; run again only with Auto-run on. */
+function sourceChanged() {
+  reanalyze();
+  markDirty();
+}
+
+/** The contexts changed: the last results no longer describe them. */
+function contextsChanged() {
+  save();
+  if (!analysis) reanalyze();
+  markDirty();
+}
+
+function markDirty() {
+  stopAnim();
+  dirty = true;
+  if (state.autorun && isValid()) runAll({ animate: false });
+  else render();
+}
+
+/** Simulate every context, then play the active one back. */
+function runAll({ animate = true } = {}) {
+  stopAnim();
+  if (timer) {
+    // an edit is still inside the debounce window: check that text, not the previous one
+    clearTimeout(timer);
+    timer = null;
+    save();
+    reanalyze();
+  }
+  if (!analysis) reanalyze();
+  if (!isValid()) {
+    render();
+    toast(analysis && !analysis.ok ? 'Fix the syntax error first: the Jenkinsfile does not compile' : 'Fix the errors first: Jenkins would reject this Jenkinsfile');
+    return;
+  }
+  const runs = new Map();
+  for (const ctx of state.contexts) {
+    try {
+      runs.set(ctx.id, simulate(analysis, ctx));
+    } catch (e) {
+      console.error(e);
+      runs.set(ctx.id, { crash: e });
+    }
+  }
+  ran = { analysis, runs };
+  dirty = false;
+  if (animate && !reducedMotion) startAnim();
+  else render();
+}
+
 const activeCtx = () => state.contexts.find((c) => c.id === state.activeCtx) || state.contexts[0] || null;
+/** Results that match the current Jenkinsfile and contexts (null when stale). */
+const results = () => (ran && !dirty ? ran.runs : null);
 const activeRun = () => {
   const c = activeCtx();
-  const r = c ? runs.get(c.id) : null;
+  const r = c ? results()?.get(c.id) : null;
   return r && !r.crash ? r : null;
 };
+
+// ------------------------------------------------------------------ playback
+
+function startAnim() {
+  const r = activeRun();
+  if (!r) { render(); return; }
+  const stages = flattenView(ran.analysis.viewTree).length;
+  anim = {
+    ctxId: activeCtx().id, t: 0, total: Math.max(r.duration, 1),
+    wall: Math.min(6500, Math.max(2600, 1500 + stages * 280)), t0: performance.now(), raf: 0, sig: '',
+  };
+  document.body.classList.add('running');
+  render();
+  const tick = (now) => {
+    if (!anim) return;
+    const p = Math.min(1, (now - anim.t0) / anim.wall);
+    // ease-in-out so the first and last stages are easy to follow
+    const e = p < 0.5 ? 2 * p * p : 1 - (-2 * p + 2) ** 2 / 2;
+    anim.t = e * anim.total;
+    $('#run-progress i').style.width = `${(p * 100).toFixed(1)}%`;
+    const sig = Object.values(r.stages).map((s) => timedStatus(s, anim.t, anim.total)).join();
+    if (sig !== anim.sig) {
+      anim.sig = sig;
+      if (state.tab === 'pipeline') renderPipeline();
+    }
+    renderSummary();
+    if (state.tab === 'log') renderLog();
+    if (p >= 1) { finishAnim(); return; }
+    anim.raf = requestAnimationFrame(tick);
+  };
+  anim.raf = requestAnimationFrame(tick);
+}
+
+function finishAnim() {
+  stopAnim();
+  celebrate = true;
+  render();
+  celebrate = false;
+}
+
+function stopAnim() {
+  if (anim) cancelAnimationFrame(anim.raf);
+  anim = null;
+  document.body.classList.remove('running');
+  const bar = $('#run-progress i');
+  if (bar) bar.style.width = '0';
+}
 
 function indexTree(tree) {
   const map = new Map();
@@ -150,11 +255,16 @@ function renderHeader() {
 
 function renderContexts() {
   const el = $('#contexts');
+  const runBtn = $('#run');
+  runBtn.classList.toggle('pending', dirty && isValid() && !state.autorun);
+  runBtn.classList.toggle('running', !!anim);
+  runBtn.querySelector('.lbl').textContent = anim ? 'Running…' : ran && !dirty ? 'Run again' : 'Run';
+  $('#autorun').checked = state.autorun;
   el.innerHTML = state.contexts.map((c) => {
-    const r = runs.get(c.id);
-    const res = !r ? 'NONE' : r.crash ? 'ERROR' : r.result;
+    const r = results()?.get(c.id);
+    const res = anim ? 'NONE' : !r ? (ran ? 'STALE' : 'NONE') : r.crash ? 'ERROR' : r.result;
     const active = c.id === activeCtx()?.id;
-    return `<span class="chip-btn${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" data-id="${esc(c.id)}" title="${esc(`${c.name}${r ? ` → ${res}` : ''}`)}">
+    return `<span class="chip-btn${active ? ' active' : ''}" role="tab" tabindex="0" aria-selected="${active}" data-id="${esc(c.id)}" title="${esc(`${c.name}${r && !anim ? ` → ${res}` : res === 'STALE' ? ' (not run since your last change)' : ''}`)}">
       <span class="dot ${esc(res)}"></span><span class="nm">${esc(c.name)}</span>
       <button class="edit" type="button" data-edit="${esc(c.id)}" title="Edit context" aria-label="Edit ${esc(c.name)}">✎</button></span>`;
   }).join('');
@@ -168,7 +278,21 @@ function renderTabs() {
 function renderSummary() {
   const el = $('#run-summary');
   const c = activeCtx();
-  const r = c ? runs.get(c.id) : null;
+  if (anim) {
+    const clock = el.querySelector('[data-clock]');
+    const text = `${fmtDur(anim.t)} / ${fmtDur(anim.total)}`;
+    if (clock && el.dataset.anim === String(anim.t0)) { clock.textContent = text; return; }
+    el.dataset.anim = String(anim.t0);
+    el.innerHTML = `<span>Running “${esc(c?.name)}” · <span data-clock>${esc(text)}</span></span><button class="skip-anim" type="button" data-skip>Skip ⏭</button>`;
+    el.querySelector('[data-skip]').onclick = finishAnim;
+    return;
+  }
+  el.dataset.anim = '';
+  if (isValid() && dirty) {
+    el.innerHTML = `<span class="stale-note">${ran ? 'Changed since the last run' : 'Not run yet'}</span>`;
+    return;
+  }
+  const r = c ? results()?.get(c.id) : null;
   if (!isValid() || !r) { el.innerHTML = ''; return; }
   if (r.crash) { el.innerHTML = `<span class="badge FAILURE">SIMULATOR ERROR</span>`; return; }
   const n = r.steps.length;
@@ -232,7 +356,7 @@ function renderEditorDeco() {
     const info = get(l);
     if (!info.diag || rankOf[d.severity] > rankOf[info.diag]) { info.diag = d.severity; info.title = d.message; }
   }
-  const r = activeRun();
+  const r = anim ? null : activeRun();
   if (r && analysis.model) {
     for (const s of analysis.model.codeStarts) {
       const l = analysis.lines.line(s);
@@ -263,8 +387,16 @@ function renderPipeline() {
   const el = $('#graph');
   if (engineError) { el.innerHTML = `<div class="graph-empty"><strong>Simulator error.</strong> ${esc(engineError.message)}</div>`; return; }
   if (!analysis) return;
+  const stale = $('#stale');
+  const showStale = isValid() && dirty;
+  stale.hidden = !showStale;
+  if (showStale) {
+    stale.innerHTML = `<span>${ran ? 'The Jenkinsfile or the contexts changed since the last run.' : 'Nothing has run yet.'} The stages below are not simulated.</span>
+      <button class="link-btn" type="button" data-run>Run now (⌘↵)</button>`;
+    stale.querySelector('[data-run]').onclick = () => runAll();
+  }
   const r = activeRun();
-  const crash = runs.get(activeCtx()?.id)?.crash;
+  const crash = results()?.get(activeCtx()?.id)?.crash;
   if (crash) { el.innerHTML = `<div class="graph-empty"><strong>The simulator crashed on this context.</strong> ${esc(crash.message)}</div>`; return; }
   renderGraph(el, analysis.viewTree, r, {
     selected: state.selected,
@@ -272,6 +404,9 @@ function renderPipeline() {
     contextName: activeCtx()?.name,
     invalid: !isValid(),
     post: r?.postRuns?.length ? r.postRuns : null,
+    time: anim && r ? anim.t : null,
+    total: anim ? anim.total : null,
+    celebrate,
   });
 }
 
@@ -313,6 +448,19 @@ function renderDetails() {
     el.innerHTML = `<h3>Fix the structure first</h3>
       <p class="reason">Jenkins validates the whole Jenkinsfile before any stage runs, so nothing is simulated while there are errors.
       Click a problem on the left to jump to it.</p>`;
+    return;
+  }
+  if (anim) {
+    el.innerHTML = `<h3>Running “${esc(activeCtx()?.name)}”…</h3>
+      <p class="reason">All ${state.contexts.length} contexts were simulated. This one is played back so you can follow the build: stages light up as the simulated clock reaches them.
+      Press <b>Skip</b> or <kbd>Esc</kbd> to jump to the result.</p>`;
+    return;
+  }
+  if (dirty) {
+    el.innerHTML = `<h3>${ran ? 'Changed since the last run' : 'Ready to run'}</h3>
+      <p class="reason">Syntax and structure are checked as you type. Press <b>Run</b> (<kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>) to simulate every context, or switch on <b>Auto-run</b> to run after each change.</p>
+      ${overview(null)}`;
+    bindReveal(el);
     return;
   }
   const r = activeRun();
@@ -392,9 +540,15 @@ function bindReveal(el) {
 
 function renderMatrix() {
   const el = $('#matrix');
-  if (!isValid()) { el.innerHTML = '<p class="matrix-intro">Fix the errors in the Jenkinsfile to compare contexts.</p>'; return; }
-  const rows = flattenView(analysis.viewTree);
-  const ctxs = state.contexts;
+  if (!ran) {
+    el.innerHTML = `<p class="matrix-intro">${isValid() ? 'Press <b>Run</b> to simulate every context and compare them here.' : 'Fix the errors in the Jenkinsfile, then press Run to compare contexts.'}</p>`;
+    return;
+  }
+  // Show the last run, even when it is stale, with a note.
+  const A = ran.analysis;
+  const runs = ran.runs;
+  const rows = flattenView(A.viewTree);
+  const ctxs = state.contexts.filter((c) => runs.has(c.id));
   const cellText = (sr) => {
     if (!sr) return { cls: 'not-run', i: '–', t: '' };
     switch (sr.status) {
@@ -408,6 +562,7 @@ function renderMatrix() {
   };
   const cur = activeCtx()?.id;
   el.innerHTML = `
+    ${dirty ? '<p class="stale" style="border-radius:6px;margin:0 0 10px">These results are from the last run: the Jenkinsfile or the contexts changed since. Press Run to update them.</p>' : ''}
     <p class="matrix-intro">Each column is one simulated build. Hover a cell for the reason; click it to open that stage in that context.</p>
     <table class="cm">
       <thead><tr><th style="text-align:left">Stage</th>${ctxs.map((c) => {
@@ -423,7 +578,7 @@ function renderMatrix() {
             const t = cellText(sr);
             return `<td class="${c.id === cur ? 'sel-col' : ''}" data-ctx="${esc(c.id)}" data-stage="${esc(node.id)}" title="${esc(sr?.reason || sr?.status || '')}"><span class="cell ${t.cls}"><span class="i">${t.i}</span><span class="t">${esc(t.t)}</span></span></td>`;
           }).join('')}</tr>`).join('')}
-        ${analysis.model.pipeline?.post ? `<tr><th>post</th>${ctxs.map((c) => {
+        ${A.model.pipeline?.post ? `<tr><th>post</th>${ctxs.map((c) => {
           const r = runs.get(c.id);
           const ran = r && !r.crash ? r.postRuns.filter((p) => p.ran).map((p) => p.cond) : [];
           return `<td class="${c.id === cur ? 'sel-col' : ''}"><span class="cell"><span class="t" title="${esc(ran.join(', '))}">${esc(ran.join(', ') || '—')}</span></span></td>`;
@@ -431,8 +586,10 @@ function renderMatrix() {
       </tbody>
     </table>`;
   el.querySelectorAll('[data-ctx]').forEach((x) => x.addEventListener('click', () => {
+    stopAnim();
     state.activeCtx = x.dataset.ctx;
-    if (x.dataset.stage) { state.selected = x.dataset.stage; state.tab = 'pipeline'; }
+    // stage ids come from the analysis of that run: only follow them while it is current
+    if (x.dataset.stage && !dirty) { state.selected = x.dataset.stage; state.tab = 'pipeline'; }
     save();
     render();
   }));
@@ -440,21 +597,27 @@ function renderMatrix() {
 
 function renderLog() {
   const el = $('#log');
-  const r = activeRun();
-  if (!r) { el.textContent = isValid() ? '' : 'Nothing ran: Jenkins would reject this Jenkinsfile.'; return; }
+  const c = activeCtx();
+  const last = ran?.runs.get(c?.id);
+  const r = last && !last.crash ? last : null;
+  if (!r) { el.textContent = !isValid() ? 'Nothing ran: Jenkins would reject this Jenkinsfile.' : 'Press Run to see the console log.'; return; }
   let inside = null;
-  if (state.selected && analysis.viewTree) {
-    const idx = indexTree(analysis.viewTree);
+  if (state.selected && ran.analysis.viewTree && !dirty) {
+    const idx = indexTree(ran.analysis.viewTree);
     const ids = new Set([state.selected]);
     for (const [id, e] of idx) {
       for (let p = e.parent; p; p = idx.get(p.id)?.parent) if (p.id === state.selected) ids.add(id);
     }
     inside = ids;
   }
-  el.innerHTML = r.log.map((l) => {
+  const upTo = anim && anim.ctxId === c.id ? anim.t : Infinity;
+  const lines = upTo === Infinity ? r.log : r.log.filter((l) => l.t <= upTo && !/^Finished:/.test(l.text));
+  const head = dirty ? '<span class="warn">(from the last run: the Jenkinsfile or the contexts changed since)</span>\n' : '';
+  el.innerHTML = head + lines.map((l) => {
     const cls = `${l.kind}${inside && l.stage && inside.has(l.stage) ? ' hl' : ''}`;
     return `<span class="${cls}">${esc(l.text)}</span>`;
   }).join('\n');
+  if (upTo !== Infinity) el.scrollTop = el.scrollHeight;
 }
 
 // ------------------------------------------------------------------ context dialog
@@ -540,7 +703,7 @@ function openContextDialog(ctx, isNew) {
   form.querySelector('[data-add-mock]').addEventListener('click', () => {
     form.querySelector('[data-mocks]').insertAdjacentHTML('beforeend', mockRow({ exitCode: 1 }));
   });
-  form.addEventListener('click', (e) => {
+  form.onclick = (e) => {
     if (e.target.matches('[data-rm]')) e.target.closest('.mock-row').remove();
     if (e.target.matches('[data-cancel]')) dlg.close();
     if (e.target.matches('[data-delete]')) {
@@ -548,18 +711,16 @@ function openContextDialog(ctx, isNew) {
       state.contexts = state.contexts.filter((x) => x.id !== c.id);
       if (state.activeCtx === c.id) state.activeCtx = state.contexts[0].id;
       dlg.close();
-      save();
-      recompute();
+      contextsChanged();
     }
     if (e.target.matches('[data-dup]')) {
       const copy = { ...readForm(form, c), id: newId(), name: `${form.elements.name.value} (copy)` };
       state.contexts.push(copy);
       state.activeCtx = copy.id;
       dlg.close();
-      save();
-      recompute();
+      contextsChanged();
     }
-  });
+  };
   form.onsubmit = (e) => {
     e.preventDefault();
     const next = readForm(form, c);
@@ -567,8 +728,7 @@ function openContextDialog(ctx, isNew) {
     else state.contexts = state.contexts.map((x) => (x.id === c.id ? next : x));
     state.activeCtx = next.id;
     dlg.close();
-    save();
-    recompute();
+    contextsChanged();
   };
   dlg.showModal();
 }
@@ -627,15 +787,20 @@ function loadExample(id, { keepContexts = false } = {}) {
   state.selected = null;
   editor.setValue(state.source);
   $('#example').value = ex.id;
+  $('#graph').scrollLeft = 0;
   save();
-  recompute();
+  reanalyze();
+  ran = null;
+  dirty = true;
+  if (isValid()) runAll();
+  else render();
 }
 
 const editor = createEditor($('#editor'), {
   onChange(v) {
     state.source = v;
     clearTimeout(timer);
-    timer = setTimeout(() => { save(); recompute(); }, 220);
+    timer = setTimeout(() => { timer = null; save(); sourceChanged(); }, 220);
   },
   onGutterClick(line) {
     const d = allProblems().find((p) => analysis.lines.line(p.s) === line);
@@ -661,11 +826,11 @@ $('#contexts').addEventListener('click', (e) => {
     return;
   }
   const chip = e.target.closest('.chip-btn');
-  if (chip) { state.activeCtx = chip.dataset.id; save(); render(); }
+  if (chip) { stopAnim(); state.activeCtx = chip.dataset.id; save(); render(); }
 });
 $('#contexts').addEventListener('keydown', (e) => {
   const chip = e.target.closest('.chip-btn');
-  if (chip && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); state.activeCtx = chip.dataset.id; save(); render(); }
+  if (chip && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); stopAnim(); state.activeCtx = chip.dataset.id; save(); render(); }
 });
 $('#ctx-add').addEventListener('click', () => {
   const base = activeCtx() || {};
@@ -677,8 +842,7 @@ $('#ctx-suggest').addEventListener('click', () => {
   const add = sug.filter((s) => !have.has(s.name));
   if (!add.length) { toast('No new contexts to suggest'); return; }
   state.contexts.push(...add);
-  save();
-  recompute();
+  contextsChanged();
   toast(`Added ${add.length} context${add.length === 1 ? '' : 's'}: ${add.map((a) => a.name).join(', ')}`);
 });
 document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => { state.tab = t.dataset.tab; save(); render(); }));
@@ -694,6 +858,33 @@ $('#share').addEventListener('click', async () => {
   }
 });
 
+$('#run').addEventListener('click', () => {
+  if (anim) { finishAnim(); return; }
+  runAll();
+});
+$('#autorun').addEventListener('change', (e) => {
+  state.autorun = e.target.checked;
+  save();
+  if (state.autorun && dirty && isValid()) runAll({ animate: false });
+  else render();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !$('#ctx-dialog').open) {
+    e.preventDefault();
+    runAll();
+  } else if (e.key === 'Escape' && anim) {
+    finishAnim();
+  }
+});
+
+/** First load: check the file and run it once, so there is something to look at. */
+function start() {
+  reanalyze();
+  dirty = true;
+  if (isValid()) runAll();
+  else render();
+}
+
 async function init() {
   if (location.hash.startsWith('#p=')) {
     try {
@@ -705,20 +896,30 @@ async function init() {
       state.activeCtx = state.contexts[0].id;
       editor.setValue(state.source);
       $('#example').value = '__custom';
-      recompute();
+      start();
       return;
     } catch (e) {
       toast('Could not read the shared link');
     }
   }
   const stored = loadStored();
+  if (stored) state.autorun = !!stored.autorun;
+  if (exampleParam && EXAMPLES.some((e) => e.id === exampleParam)) {
+    // A link from the landing page. Drop the parameter so a reload restores the saved work instead.
+    if (!embed) history.replaceState(null, '', location.pathname);
+    const edited = stored && stored.source != null && stored.source !== stored.pristine;
+    if (!edited || confirm('Open this example? It replaces the Jenkinsfile you were editing.')) {
+      loadExample(exampleParam);
+      return;
+    }
+  }
   if (stored && stored.source != null && Array.isArray(stored.contexts) && stored.contexts.length) {
     Object.assign(state, { source: stored.source, exampleId: stored.exampleId, pristine: stored.pristine ?? stored.source, tab: stored.tab || 'pipeline' });
     state.contexts = stored.contexts.map((c) => normalizeContext(c));
     state.activeCtx = state.contexts.some((c) => c.id === stored.activeCtx) ? stored.activeCtx : state.contexts[0].id;
     editor.setValue(state.source);
-    $('#example').value = EXAMPLES.some((e) => e.id === state.exampleId) && state.source === state.pristine ? state.exampleId : (state.source === state.pristine ? state.exampleId : '__custom');
-    recompute();
+    $('#example').value = EXAMPLES.some((e) => e.id === state.exampleId) && state.source === state.pristine ? state.exampleId : '__custom';
+    start();
     return;
   }
   loadExample('multibranch');

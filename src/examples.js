@@ -416,11 +416,11 @@ const secrets = `pipeline {
 `;
 
 export const EXAMPLES = [
-  { id: 'multibranch', title: 'Build, test, deploy (multibranch)', source: multibranch, contexts: null },
-  { id: 'monorepo', title: 'Monorepo: changeset and changelog', source: monorepo, contexts: monorepoContexts },
-  { id: 'matrix', title: 'Matrix build with excludes', source: matrix, contexts: matrixContexts },
-  { id: 'params', title: 'Parameters, retry, triggeredBy', source: params, contexts: paramsContexts },
-  { id: 'scripted', title: 'Scripted pipeline (node / if / loops)', source: scripted, contexts: scriptedContexts },
-  { id: 'secrets', title: 'Credentials and input', source: secrets, contexts: null },
-  { id: 'mistakes', title: 'Common mistakes (syntax checks)', source: mistakes, contexts: null },
+  { id: 'multibranch', title: 'Build, test, deploy (multibranch)', blurb: 'Push, PR, tag and nightly builds of one multibranch pipeline: parallel tests, a Docker image, and deploys gated by when.', tag: 'Declarative', hue: '#7c93ff', source: multibranch, contexts: null },
+  { id: 'monorepo', title: 'Monorepo: changeset and changelog', blurb: 'Build only what changed: changeset, changelog and beforeAgent, including the first build of a branch, which has no changeset.', tag: 'Declarative', hue: '#3fcf8e', source: monorepo, contexts: monorepoContexts },
+  { id: 'matrix', title: 'Matrix build with excludes', blurb: 'Six platform × JDK cells minus an exclude, a per-cell when, and a Windows-only smoke test that fails.', tag: 'Matrix', hue: '#5aa9ff', source: matrix, contexts: matrixContexts },
+  { id: 'params', title: 'Parameters, retry, triggeredBy', blurb: "Build parameters, triggeredBy 'TimerTrigger', a stage retry that recovers from a flaky test, and input validation that fails the build.", tag: 'Parameters', hue: '#f5b041', source: params, contexts: paramsContexts },
+  { id: 'scripted', title: 'Scripted pipeline (node / if / loops)', blurb: 'node, if/else, try/catch and a loop of stages. A stage that never ran says which if was false.', tag: 'Scripted', hue: '#c58bff', source: scripted, contexts: scriptedContexts },
+  { id: 'secrets', title: 'Credentials and input', blurb: 'credentials() and withCredentials: the Groovy-interpolation warning Jenkins prints, and an input step that holds an executor.', tag: 'Security', hue: '#ff6b6b', source: secrets, contexts: null },
+  { id: 'mistakes', title: 'Common mistakes (syntax checks)', blurb: 'The errors Jenkins rejects most often, each with the message the validator prints and a hint on how to fix it.', tag: 'Syntax checks', hue: '#9ba1aa', source: mistakes, contexts: null },
 ];

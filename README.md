@@ -10,9 +10,11 @@ npm test                   # engine tests (Node 20+)
 node tests/smoke.mjs       # print every example × context outcome
 ```
 
-Then open http://localhost:5188. There is no build step and there are no dependencies.
+Then open http://localhost:5188 for the landing page, or http://localhost:5188/play.html for the playground. There is no build step and there are no dependencies.
 
 ## What it does
+
+- **Live checks, runs on demand.** Syntax and structure are checked as you type. A run simulates every context at once, and only when you press **Run** (or <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>). The active context is then played back: stages light up as the simulated clock reaches them, parallel branches run side by side, and the console log streams in. <kbd>Esc</kbd> skips to the result. After an edit, the previous results are marked as stale until you run again. Switch on **Auto-run** to run after every change instead.
 
 - **Syntax and structure checks.** A Groovy-subset parser reports compile errors (unclosed blocks and strings, stray tokens) at the exact position. The declarative checks mirror Jenkins' validator: missing `agent`/`stages`, steps outside `steps { }`, Groovy code that needs `script { }`, unknown `when` conditions, `post` conditions and agent types, duplicate stage names, environment values, cron specs and matrix axes. Lints flag an `input` step that holds an executor, a `when` without `beforeAgent`, a missing global timeout, and secrets interpolated into `sh`.
 - **Run contexts.** Each context describes one build: branch, pull request or tag, the build cause, changed files, commit messages, parameters, the previous result, the input decision and mock rules. The multibranch environment is set the way Jenkins sets it, for example `BRANCH_NAME = PR-42` on pull requests and the tag name on tag builds.
@@ -30,7 +32,8 @@ Then open http://localhost:5188. There is no build step and there are no depende
 | `src/engine/interp.js` | Groovy interpreter (collections, closures, exceptions, String/List/Map methods) |
 | `src/engine/engine.js` | `analyze()` and `simulate()`: run model, mocked steps, globals (`env`, `params`, `currentBuild`, `docker`) |
 | `src/engine/contexts.js` | Run contexts, the environment and build causes, preset and suggested contexts |
-| `src/ui/` | Editor, SVG stage graph, app wiring |
+| `play.html`, `styles.css`, `src/ui/` | Playground: editor, SVG stage graph with playback, app wiring (`?example=<id>` opens an example, `?embed=1` is used by the landing page) |
+| `index.html`, `site.css`, `src/site/landing.js` | Landing page (shares its look with KubeDraft) |
 | `src/examples.js` | Example Jenkinsfiles with their own contexts |
 
 ## Limits

@@ -35,8 +35,30 @@ function expand(tree, run) {
   return { ...tree, items };
 }
 
+/**
+ * Status of a stage at simulated time `time` (seconds) during playback;
+ * the final status when `time` is null.
+ */
+export function timedStatus(sr, time, total) {
+  if (!sr) return 'pending';
+  if (time == null) return sr.status;
+  if (sr.start == null) return time >= total ? sr.status : 'pending';
+  if (time < sr.start) return 'pending';
+  // a stage that ran several times (a loop in a scripted pipeline) is running only inside one of its runs
+  if (sr.spans && sr.spans.length > 1) {
+    if (sr.spans.some(([a, b]) => time >= a && time < b)) return 'running';
+    return time >= sr.spans[sr.spans.length - 1][1] ? sr.status : 'pending';
+  }
+  // skipped stages may still allocate an agent or wait for input before `when` says no
+  if (sr.end == null || time < sr.end) return 'running';
+  return sr.status;
+}
+
 export function renderGraph(el, tree, run, opts) {
   const { selected, onSelect, contextName, invalid, post } = opts;
+  const time = opts.time ?? null;
+  const simTotal = opts.total ?? (run ? Math.max(run.duration, 1) : 0);
+  const finished = time == null || time >= simTotal;
   if (!tree || !tree.items.length) {
     el.innerHTML = `<div class="graph-empty">${invalid ? '<strong>Jenkins would reject this file.</strong> Fix the problems on the left to see the stages.' : 'No stages found. Add <code>stages { stage(\'Build\') { steps { ... } } }</code>.'}</div>`;
     return;
@@ -61,11 +83,14 @@ export function renderGraph(el, tree, run, opts) {
   const total = measure(tree);
   const parts = [];
   const edges = [];
-  const statusOf = (id) => (invalid ? 'pending' : run?.stages[id]?.status || 'pending');
+  const statusOf = (id) => (invalid || !run ? 'pending' : timedStatus(run.stages[id], time, simTotal));
   const ran = (st) => ['success', 'failure', 'unstable'].includes(st);
 
   const subtitle = (n, sr) => {
     if (invalid || !sr) return n.when ? `when ${n.when}` : n.input ? 'waits for input' : '';
+    const now = statusOf(n.id);
+    if (now === 'running') return sr.steps.some((s) => s.kind === 'input' && s.t <= time && time < s.t + s.dur) ? 'waiting for input…' : 'running…';
+    if (now === 'pending') return n.when ? `when ${n.when}` : 'queued';
     if (sr.status === 'skipped') {
       if (sr.skip === 'when') return `skipped · ${sr.reason.replace(/ → false.*/, '')}`;
       if (sr.skip === 'failure') return 'skipped · earlier failure';
@@ -119,11 +144,11 @@ export function renderGraph(el, tree, run, opts) {
         const is = sizes.get(it);
         const a = draw(it, cx, y + (s.h - is.h) / 2);
         if (!first) first = a;
-        if (prev) edges.push({ d: `M${prev.ox} ${prev.oy} L${a.ix} ${a.iy}`, on: prev.on && a.on });
+        if (prev) edges.push({ d: `M${prev.ox} ${prev.oy} L${a.ix} ${a.iy}`, on: prev.on && a.on, active: a.running });
         prev = a;
         cx += is.w + GX;
       }
-      return { ix: first.ix, iy: first.iy, ox: prev.ox, oy: prev.oy, on: first.on && prev.on, onIn: first.on };
+      return { ix: first.ix, iy: first.iy, ox: prev.ox, oy: prev.oy, on: first.on && prev.on, onIn: first.on, running: first.running };
     }
     if (n.kind === 'par') {
       const mid = y + s.h / 2;
@@ -131,16 +156,18 @@ export function renderGraph(el, tree, run, opts) {
       const jx = x + s.w;
       let cy = y;
       let anyOn = false;
+      let anyRunning = false;
       for (const it of n.items) {
         const is = sizes.get(it);
         const a = draw(it, x + FORK, cy);
         const c = FORK * 0.9;
-        edges.push({ d: `M${fx} ${mid} C${fx + c} ${mid}, ${a.ix - c} ${a.iy}, ${a.ix} ${a.iy}`, on: a.on });
+        edges.push({ d: `M${fx} ${mid} C${fx + c} ${mid}, ${a.ix - c} ${a.iy}, ${a.ix} ${a.iy}`, on: a.on, active: a.running });
         edges.push({ d: `M${a.ox} ${a.oy} L${jx - FORK} ${a.oy} C${jx - FORK + c} ${a.oy}, ${jx - c} ${mid}, ${jx} ${mid}`, on: a.on });
         if (a.on) anyOn = true;
+        if (a.running) anyRunning = true;
         cy += is.h + GY;
       }
-      return { ix: fx, iy: mid, ox: jx, oy: mid, on: anyOn };
+      return { ix: fx, iy: mid, ox: jx, oy: mid, on: anyOn, running: anyRunning };
     }
     // stage
     const container = n.children && n.children.items.length;
@@ -151,7 +178,7 @@ export function renderGraph(el, tree, run, opts) {
       draw(n.children, x + PAD + (s.w - 2 * PAD - inner.w) / 2, y + HDR);
     } else box(n, x, y, s.w, s.h, false);
     const cyMid = container ? y + HDR / 2 : y + H / 2;
-    return { ix: x, iy: container ? cyMid : y + s.h / 2, ox: x + s.w, oy: container ? cyMid : y + s.h / 2, on: ran(st) };
+    return { ix: x, iy: container ? cyMid : y + s.h / 2, ox: x + s.w, oy: container ? cyMid : y + s.h / 2, on: ran(st), running: st === 'running' };
   };
 
   const top = 26;
@@ -163,10 +190,11 @@ export function renderGraph(el, tree, run, opts) {
   // pipeline post
   const postParts = [];
   if (post && post.length) {
+    // laid out from the start of playback so the graph does not jump when the build finishes
     const ranPost = post.filter((p) => p.ran);
     const pw = 150;
     const ph = 46;
-    const label = ranPost.length ? ranPost.map((p) => p.cond).join(', ') : 'none ran';
+    const label = !finished ? '…' : ranPost.length ? ranPost.map((p) => p.cond).join(', ') : 'none ran';
     postParts.push(`<g class="g-post"><title>${esc(post.map((p) => `${p.ran ? '✓' : '·'} ${p.cond}: ${p.why}`).join('\n'))}</title>
       <rect x="${endX}" y="${mid - ph / 2}" width="${pw}" height="${ph}" rx="8"/>
       <text class="g-label" x="${endX + 10}" y="${mid - 5}">post</text>
@@ -177,19 +205,19 @@ export function renderGraph(el, tree, run, opts) {
   } else {
     edges.push({ d: `M${a.ox} ${a.oy} L${endX - TERM} ${mid}`, on: a.on });
   }
-  edges.push({ d: `M${startX + TERM} ${mid} L${a.ix} ${a.iy}`, on: a.onIn ?? a.on });
-  const result = invalid ? '' : run?.result || '';
+  edges.push({ d: `M${startX + TERM} ${mid} L${a.ix} ${a.iy}`, on: a.onIn ?? a.on, active: a.running });
+  const result = invalid || !finished ? '' : run?.result || '';
   const endIcon = { SUCCESS: '✓', FAILURE: '✕', UNSTABLE: '!', ABORTED: '■' }[result] || '';
   const width = endX + TERM + 24;
   const height = top + total.h + 34;
   el.innerHTML = `<svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="Stage graph">
-    ${edges.map((e) => `<path class="g-edge${e.on ? ' on' : ''}" d="${e.d}"/>`).join('')}
+    ${edges.map((e) => `<path class="g-edge${e.on ? ' on' : ''}${e.active && !e.on ? ' active' : ''}" d="${e.d}"/>`).join('')}
     <g class="g-term start"><title>${esc(contextName || 'trigger')}</title><circle cx="${startX}" cy="${mid}" r="${TERM}"/><text class="ic" x="${startX}" y="${mid + 5}" text-anchor="middle">▶</text>
       <text x="${startX}" y="${mid + TERM + 14}" text-anchor="middle">${esc(trunc(contextName || 'start', 16))}</text></g>
     ${parts.join('')}
     ${postParts.join('')}
-    <g class="g-term end ${esc(result)}"><circle cx="${endX}" cy="${mid}" r="${TERM}"/><text class="ic" x="${endX}" y="${mid + 5}" text-anchor="middle">${endIcon}</text>
-      <text x="${endX}" y="${mid + TERM + 14}" text-anchor="middle">${esc(result.toLowerCase() || 'end')}</text></g>
+    <g class="g-term end ${esc(result)}${opts.celebrate && result ? ' done' : ''}"><circle cx="${endX}" cy="${mid}" r="${TERM}"/><text class="ic" x="${endX}" y="${mid + 5}" text-anchor="middle">${endIcon}</text>
+      <text x="${endX}" y="${mid + TERM + 14}" text-anchor="middle">${esc(result.toLowerCase() || (time != null ? 'running…' : 'end'))}</text></g>
   </svg>`;
   el.querySelectorAll('.g-node').forEach((g) => {
     g.addEventListener('click', () => onSelect(g.dataset.id));

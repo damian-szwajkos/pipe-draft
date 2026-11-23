@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PipeDraft · Playground</title>
+  <meta name="description" content="Dry-run Jenkins pipelines in the browser: see which stages run, when, and why.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232563eb'/%3E%3Cpath d='M7 16h5m8 0h5M12 11h8v10h-8z' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="./" title="PipeDraft home">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="4.5" cy="12" r="2.2"/><circle cx="19.5" cy="6.5" r="2.2"/><circle cx="19.5" cy="17.5" r="2.2"/><path d="M6.7 12h4.3M11 12c2.4 0 2.6-5.5 6.3-5.5M11 12c2.4 0 2.6 5.5 6.3 5.5"/></svg>
+      </span>
+      <span class="name">PipeDraft</span>
+      <span class="tag">Jenkins pipeline dry-run</span>
+    </a>
+    <div class="top-actions">
+      <label class="select-wrap">
+        <span class="sr">Example</span>
+        <select id="example"></select>
+      </label>
+      <button id="share" class="btn" type="button" title="Copy a link with this Jenkinsfile and its contexts">Share link</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="pane editor-pane" aria-label="Jenkinsfile editor">
+      <div class="pane-head">
+        <span class="file">Jenkinsfile</span>
+        <span id="mode" class="chip"></span>
+        <span id="validity" class="validity"></span>
+      </div>
+      <div id="editor" class="editor"></div>
+      <div class="problems">
+        <div class="problems-head">
+          <span>Problems</span>
+          <span id="problem-count" class="count"></span>
+        </div>
+        <ul id="problems" class="problem-list"></ul>
+      </div>
+    </section>
+
+    <section class="pane run-pane" aria-label="Simulated runs">
+      <div class="ctx-bar">
+        <span class="ctx-label">Run context</span>
+        <div id="contexts" class="ctx-chips" role="tablist"></div>
+        <div class="ctx-actions">
+          <button id="ctx-add" class="btn small" type="button" title="Add a run context">+ Context</button>
+          <button id="ctx-suggest" class="btn small ghost" type="button" title="Add contexts that flip the conditions in this pipeline">Suggest from conditions</button>
+        </div>
+      </div>
+      <div class="run-progress" id="run-progress" aria-hidden="true"><i></i></div>
+      <div class="tabs" role="tablist">
+        <button class="tab" data-tab="pipeline" type="button">Stages</button>
+        <button class="tab" data-tab="matrix" type="button">Condition matrix</button>
+        <button class="tab" data-tab="log" type="button">Console log</button>
+        <div id="run-summary" class="run-summary"></div>
+        <div class="run-ctl">
+          <label class="autorun" title="Run again automatically after every change"><input type="checkbox" id="autorun"> Auto-run</label>
+          <button id="run" class="btn primary run-btn" type="button" title="Run the pipeline for every context (⌘/Ctrl + Enter)">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5l12 7.5-12 7.5z" fill="currentColor"/></svg>
+            <span class="lbl">Run</span><kbd>⌘↵</kbd>
+          </button>
+        </div>
+      </div>
+      <div class="tab-body">
+        <div id="tab-pipeline" class="tab-panel">
+          <div id="stale" class="stale" hidden></div>
+          <div id="graph" class="graph"></div>
+          <div id="details" class="details"></div>
+        </div>
+        <div id="tab-matrix" class="tab-panel"><div id="matrix" class="matrix-wrap"></div></div>
+        <div id="tab-log" class="tab-panel"><pre id="log" class="log"></pre></div>
+      </div>
+    </section>
+  </main>
+
+  <dialog id="ctx-dialog" class="dialog">
+    <form id="ctx-form" method="dialog"></form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script type="module" src="src/ui/app.js"></script>
+</body>
+</html>

@@ -939,11 +939,17 @@ class Run {
           r.sr.reason = `aborted by failFast: "${first.name}" failed first`;
           r.sr.end = tf;
           for (const st of this.steps) if (st.t >= tf && this.isInside(st.stage, r.id)) st.status = 'not-run';
+          // nothing inside the aborted branch may outlive the abort
           for (const s2 of this.stages.values()) {
-            if (s2 !== r.sr && this.isInside(s2.id, r.id) && s2.start != null && s2.start >= tf && s2.status !== 'skipped') {
+            if (s2 === r.sr || !this.isInside(s2.id, r.id) || s2.start == null) continue;
+            const late = s2.end == null || s2.end > tf;
+            if (late && s2.status !== 'skipped') {
               s2.status = 'aborted';
+              s2.result = 'ABORTED';
               s2.reason = `aborted by failFast: "${first.name}" failed first`;
             }
+            s2.start = Math.min(s2.start, tf);
+            if (late) s2.end = tf;
           }
         }
       }
@@ -1048,6 +1054,7 @@ class Run {
     }
     const sr = this.stageRun(id, name);
     if (sr.instances === 1) sr.start = this.clock;
+    const spanStart = this.clock;
     sr.status = 'running';
     this.pl('stage');
     this.pl(`{ (${name})`);
@@ -1066,6 +1073,7 @@ class Run {
       this.env.pop();
       this.stack.pop();
       this.finishStage(sr);
+      (sr.spans = sr.spans || []).push([spanStart, this.clock]);
       this.pl('}');
       this.pl('// stage');
     }
@@ -1112,6 +1120,7 @@ class Run {
         r.sr.status = 'aborted';
         r.sr.result = 'ABORTED';
         r.sr.reason = `aborted by failFast: "${first.name}" failed first`;
+        r.sr.end = first.failedAt;
         for (const st of this.steps) if (st.t >= first.failedAt && st.stage === r.id) st.status = 'not-run';
       }
       this.clock = Math.max(first.failedAt, ...failed.map((r) => r.end));

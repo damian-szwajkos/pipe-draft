@@ -187,3 +187,34 @@ test('secrets interpolated into sh produce a warning; single quotes do not', () 
   assert.equal(r.warnings.filter((w) => /Groovy String interpolation/.test(w.message)).length, 1);
   assert.ok(!r.log.some((l) => l.text.includes('')), 'secret markers must be masked in the log');
 });
+
+test('playback: nothing inside a failFast-aborted branch outlives the run', async () => {
+  const { timedStatus } = await import('../src/ui/graph.js');
+  const src = pipe(`stage('P') { failFast true
+  parallel {
+    stage('Bad') { steps { error 'boom' } }
+    stage('Long') { stages {
+      stage('L1') { steps { sh 'npm ci'; sh 'npm test' } }
+      stage('L2') { steps { sh 'npm run build' } }
+    } }
+  } }`);
+  const { r, st } = run(src);
+  for (const s of Object.values(r.stages)) {
+    if (s.start != null) assert.ok(s.end <= r.duration, `${s.name} ends at ${s.end} after the run (${r.duration})`);
+    assert.notEqual(timedStatus(s, r.duration, r.duration), 'running', `${s.name} still running at the end`);
+  }
+  assert.equal(st.L1.status, 'aborted');
+});
+
+test('playback: a scripted stage in a loop runs only inside its own iterations', async () => {
+  const { timedStatus } = await import('../src/ui/graph.js');
+  const src = "node {\n  for (r in ['a', 'b']) {\n    stage(\"Smoke ${r}\") { sh './smoke.sh' }\n    stage(\"Wait ${r}\") { sleep 30 }\n  }\n}";
+  const an = analyze(src);
+  const r = simulate(an, main);
+  const smoke = Object.values(r.stages).find((s) => s.name.startsWith('Smoke'));
+  const wait = Object.values(r.stages).find((s) => s.name.startsWith('Wait'));
+  assert.equal(smoke.spans.length, 2);
+  const midWait = (wait.spans[0][0] + wait.spans[0][1]) / 2;
+  assert.equal(timedStatus(wait, midWait, r.duration), 'running');
+  assert.notEqual(timedStatus(smoke, midWait, r.duration), 'running');
+});

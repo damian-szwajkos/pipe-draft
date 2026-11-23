@@ -413,3 +413,50 @@ legend { font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 4px;
   .brand .tag { display: none; }
   select { max-width: 180px; }
 }
+
+/* ---------- run control */
+.brand { color: inherit; text-decoration: none; }
+.run-ctl { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.autorun { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.run-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px 0 12px; font-weight: 600; position: relative; }
+.run-btn kbd { font: 11px var(--mono); opacity: 0.75; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 4px; padding: 0 4px; }
+.run-btn.pending::after {
+  content: ""; position: absolute; top: -4px; right: -4px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--warn); border: 2px solid var(--panel);
+}
+.run-btn.running { opacity: 0.85; }
+.run-btn.running svg { animation: spin 0.9s linear infinite; }
+.run-progress { height: 2px; background: transparent; position: relative; overflow: hidden; }
+.run-progress i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--accent); transition: width 0.08s linear; }
+body.running .run-progress { background: var(--accent-soft); }
+.stale {
+  display: flex; align-items: center; gap: 10px; padding: 7px 14px; font-size: 13px; color: var(--warn);
+  background: var(--warn-soft); border-bottom: 1px solid var(--border);
+}
+.stale[hidden] { display: none; }
+.stale .link-btn { font-weight: 600; }
+.dot.STALE { background: transparent; border: 2px solid var(--border-strong); }
+.run-summary .stale-note { color: var(--warn); }
+.run-summary .skip-anim { border: 0; background: none; color: var(--accent); cursor: pointer; font-size: 12.5px; padding: 0; }
+
+/* ---------- run animation */
+.st-running rect.box { stroke: var(--accent); stroke-width: 2; fill: color-mix(in srgb, var(--accent-soft) 60%, var(--panel)); }
+.st-running .badge-c { fill: var(--accent); }
+.st-running .ic { animation: spin 1s linear infinite; transform-box: fill-box; transform-origin: center; }
+.st-pending .nm { fill: var(--muted); }
+.st-pending rect.box { stroke-dasharray: 2 3; }
+.g-edge.active { stroke: var(--accent); stroke-dasharray: 6 5; animation: flow 0.6s linear infinite; }
+.g-node.just-done rect.box { animation: pop 0.35s ease-out; }
+.g-term.end.done circle { animation: pop 0.45s ease-out; transform-box: fill-box; transform-origin: center; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes flow { to { stroke-dashoffset: -11; } }
+@keyframes pop { 0% { transform: scale(0.92); } 60% { transform: scale(1.04); } 100% { transform: none; } }
+.g-node rect.box { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) {
+  .st-running .ic, .g-edge.active, .run-btn.running svg, .g-node.just-done rect.box, .g-term.end.done circle { animation: none; }
+}
+
+/* ---------- embedded on the landing page */
+body.embed .top { display: none; }
+body.embed .layout { padding: 10px; gap: 10px; }
+.tabs .run-ctl { margin-left: 12px; padding: 5px 0; }
