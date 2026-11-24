@@ -27,11 +27,12 @@
   </header>
 
   <main class="layout">
-    <section class="pane editor-pane" aria-label="Jenkinsfile editor">
+    <section id="editor-pane" class="pane editor-pane" aria-label="Jenkinsfile editor">
       <div class="pane-head">
         <div id="files" class="files" role="tablist" aria-label="Jenkinsfiles"></div>
         <span id="mode" class="chip"></span>
         <span id="validity" class="validity"></span>
+        <button id="editor-collapse" class="fold-btn" type="button" title="Hide the editor" aria-label="Hide the editor" aria-controls="editor-pane">«</button>
       </div>
       <div id="editor" class="editor"></div>
       <div class="problems">
@@ -42,6 +43,15 @@
         <ul id="problems" class="problem-list"></ul>
       </div>
     </section>
+
+    <div id="splitter" class="splitter" role="separator" aria-orientation="vertical" aria-controls="editor-pane" aria-label="Resize the editor" tabindex="0">
+      <span class="grip" aria-hidden="true"></span>
+      <button id="editor-expand" class="rail" type="button" title="Show the editor" aria-label="Show the editor" aria-controls="editor-pane">
+        <span class="rail-icon" aria-hidden="true">»</span>
+        <span class="rail-label">Jenkinsfile</span>
+        <span id="rail-badge" class="rail-badge" hidden></span>
+      </button>
+    </div>
 
     <section class="pane run-pane" aria-label="Simulated runs">
       <div class="ctx-bar">

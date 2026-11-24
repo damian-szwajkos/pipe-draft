@@ -116,7 +116,7 @@ select { max-width: 280px; }
 /* ---------- layout */
 .layout {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: minmax(380px, 44%) 1fr; gap: 12px; padding: 12px;
+  display: grid; grid-template-columns: var(--editor-w, minmax(380px, 44%)) 12px minmax(0, 1fr); gap: 12px 0; padding: 12px;
 }
 .pane {
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
@@ -458,7 +458,7 @@ body.running .run-progress { background: var(--accent-soft); }
 
 /* ---------- embedded on the landing page */
 body.embed .top { display: none; }
-body.embed .layout { padding: 10px; gap: 10px; }
+body.embed .layout { padding: 10px; gap: 10px 0; }
 .tabs .run-ctl { margin-left: 12px; padding: 5px 0; }
 
 /* ---------- Jenkinsfile tabs (the main file and the jobs build job: can start) */
@@ -524,3 +524,66 @@ body.embed .layout { padding: 10px; gap: 10px; }
 .run-summary { min-width: 0; overflow: hidden; }
 .run-summary > span:first-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .graph.chain { max-height: 68%; }
+
+/* ---------- resizable, foldable editor */
+.fold-btn {
+  flex: none; width: 24px; height: 24px; margin-right: -4px; display: inline-grid; place-items: center;
+  border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted);
+  font: 600 15px/1 var(--sans, inherit); cursor: pointer;
+}
+.fold-btn:hover { background: var(--panel-2); border-color: var(--border); color: var(--text); }
+.fold-btn:focus-visible, .rail:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pane-head .validity + .fold-btn { margin-left: 2px; }
+
+.splitter {
+  position: relative; display: flex; align-items: center; justify-content: center;
+  cursor: col-resize; touch-action: none; outline: none; min-height: 0;
+}
+.splitter::before { /* a wider hit area than the visible gap */
+  content: ""; position: absolute; inset: 0 -4px;
+}
+.splitter .grip {
+  width: 4px; height: 40px; border-radius: 4px; background: var(--border-strong, var(--border));
+  opacity: 0; transition: opacity 0.15s, background 0.15s, height 0.15s;
+}
+.splitter:hover .grip, .splitter:focus-visible .grip, .layout.resizing .splitter .grip { opacity: 1; }
+.splitter:focus-visible .grip, .layout.resizing .splitter .grip { background: var(--accent); height: 64px; }
+.layout.resizing, .layout.resizing * { cursor: col-resize !important; user-select: none; }
+.layout.resizing .editor-pane { transition: none; }
+.layout.snap .editor-pane { opacity: 0.4; }
+.layout.snap .splitter .grip { background: var(--warn, var(--muted)); }
+
+.rail { display: none; }
+.layout.collapsed { grid-template-columns: 36px minmax(0, 1fr); column-gap: 12px; }
+.layout.collapsed .editor-pane { display: none; }
+.layout.collapsed .splitter { cursor: default; align-items: stretch; }
+.layout.collapsed .splitter .grip { display: none; }
+.layout.collapsed .rail {
+  display: flex; flex-direction: column; align-items: center; gap: 10px; width: 100%; padding: 10px 0;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+  color: var(--muted); cursor: pointer; font: inherit;
+}
+.layout.collapsed .rail:hover { color: var(--text); border-color: var(--accent); }
+.rail-icon { font-weight: 600; font-size: 15px; line-height: 1; }
+.rail-label { writing-mode: vertical-rl; font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.02em; }
+.rail-badge {
+  min-width: 18px; padding: 1px 4px; border-radius: 99px; font-size: 11px; font-weight: 600; text-align: center;
+  background: var(--fail); color: #fff;
+}
+.rail-badge.warning { background: var(--warn, #b7791f); }
+
+/* a narrow run pane (wide editor): the Run controls drop onto their own row instead of clipping */
+.run-pane { container-type: inline-size; }
+@container (max-width: 700px) {
+  .tabs { flex-wrap: wrap; }
+  .tabs .run-ctl { margin-left: auto; }
+  .tabs .run-summary { order: 3; flex-basis: 100%; margin-left: 0; padding: 0 4px 6px; }
+  .tabs .run-summary:empty { display: none; }
+}
+
+/* stacked layout on small screens: no divider, the editor is always shown */
+@media (max-width: 1000px) {
+  .layout, .layout.collapsed { grid-template-columns: 1fr; column-gap: 0; }
+  .splitter, .fold-btn { display: none; }
+  .layout.collapsed .editor-pane { display: flex; opacity: 1; }
+}

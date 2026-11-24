@@ -5,6 +5,7 @@ import { presetContexts, normalizeContext, suggestContexts, newId, CAUSES } from
 import { makeJobResolver, chainRuns, chainTotal, runAt } from '../engine/jobs.js';
 import { EXAMPLES } from '../examples.js';
 import { createEditor } from './editor.js';
+import { createSplit } from './split.js';
 import { renderGraph, timedStatus } from './graph.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -570,6 +571,7 @@ function renderProblems() {
   if (engineError) {
     el.innerHTML = `<li><span class="sev error">✕</span><span>Simulator error: ${esc(engineError.message)}</span></li>`;
     count.textContent = '';
+    railBadge(1, 0);
     return;
   }
   const A = openAnalysis();
@@ -577,6 +579,7 @@ function renderProblems() {
   const errs = list.filter((d) => d.severity === 'error').length;
   const warns = list.filter((d) => d.severity === 'warning').length;
   count.textContent = list.length ? `${errs} error${errs === 1 ? '' : 's'}, ${warns} warning${warns === 1 ? '' : 's'}, ${list.length - errs - warns} info` : '';
+  railBadge(errs, warns);
   if (!list.length) {
     el.innerHTML = '<li class="empty">No problems found.</li>';
     return;
@@ -1226,6 +1229,30 @@ const editor = createEditor($('#editor'), {
     if (d) editor.reveal(d.s, d.e);
   },
 });
+
+// Drag the divider to resize the editor; « folds it into a rail, and the rail brings it back.
+const split = createSplit({
+  layout: $('.layout'), pane: $('#editor-pane'), splitter: $('#splitter'),
+  collapseBtn: $('#editor-collapse'), expandBtn: $('#editor-expand'),
+  persist: !embed,   // the landing-page demo always starts with the editor open
+});
+// an explicit jump ("show in editor", a line link) opens a folded editor first;
+// selecting a stage in the graph (select: false) leaves it folded
+const revealIn = editor.reveal.bind(editor);
+editor.reveal = (s, e, opts = {}) => {
+  if (opts.select !== false) split.expand();
+  return revealIn(s, e, opts);
+};
+
+/** Error/warning count on the folded editor's rail. */
+function railBadge(errs, warns) {
+  const b = $('#rail-badge');
+  if (!b) return;
+  b.hidden = !errs && !warns;
+  b.textContent = String(errs || warns);
+  b.classList.toggle('warning', !errs);
+  b.title = errs ? `${errs} error${errs === 1 ? '' : 's'}` : `${warns} warning${warns === 1 ? '' : 's'}`;
+}
 
 $('#example').innerHTML = EXAMPLES.map((e) => `<option value="${e.id}">${esc(e.title)}</option>`).join('') + '<option value="__custom" hidden>Your Jenkinsfile</option>';
 $('#example').addEventListener('change', (e) => {
