@@ -2,6 +2,8 @@
 
 Dry-run Jenkins pipelines in the browser. Paste a Jenkinsfile and see which stages run, when, and why, for every kind of build: a push to `main`, a pull request, a tag, a nightly cron run, or a run where a command fails. Nothing is executed and nothing leaves the browser. Built alongside ArchDraft, CloudDraft and KubeDraft.
 
+**Live:** https://damian-szwajkos.github.io/pipe-draft/ · [Playground](https://damian-szwajkos.github.io/pipe-draft/play.html)
+
 ## Run
 
 ```bash
