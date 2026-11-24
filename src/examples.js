@@ -415,11 +415,138 @@ const secrets = `pipeline {
 }
 `;
 
+const chain = `pipeline {
+    agent any
+
+    parameters {
+        choice(name: 'BUILD_TYPE', choices: ['Snapshot', 'PreRelease', 'Release'], description: 'What this build produces')
+        string(name: 'VERSION', defaultValue: '1.4.0', description: 'Version to pre-release or release')
+        booleanParam(name: 'DEPLOY_STAGING', defaultValue: true, description: 'Deploy the release candidate to staging')
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                checkout scm
+                sh './gradlew assemble'
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                sh './gradlew test'
+            }
+        }
+
+        // main: start the prerelease branch of this same multibranch project
+        stage('Start pre-release') {
+            when {
+                branch 'main'
+                expression { params.BUILD_TYPE == 'PreRelease' }
+            }
+            steps {
+                script {
+                    def project = env.JOB_NAME.split('/')[0]
+                    def rc = build(job: "\${project}/prerelease", parameters: [
+                        string(name: 'VERSION', value: "\${params.VERSION}-rc.\${env.BUILD_NUMBER}"),
+                        booleanParam(name: 'DEPLOY_STAGING', value: params.DEPLOY_STAGING)
+                    ])
+                    echo "Pre-release build #\${rc.number} finished: \${rc.result}"
+                }
+            }
+        }
+
+        // prerelease: the build started above
+        stage('Pre-release') {
+            when { branch 'prerelease' }
+            stages {
+                stage('Integration tests') {
+                    steps {
+                        sh './gradlew integrationTest'
+                    }
+                }
+                stage('Publish RC') {
+                    steps {
+                        sh "./gradlew publish -Pversion=\${params.VERSION}"
+                    }
+                }
+                stage('Deploy to staging') {
+                    when { expression { params.DEPLOY_STAGING } }
+                    steps {
+                        // a separate job, started without waiting for it
+                        build job: 'deploy-staging', wait: false, parameters: [
+                            string(name: 'VERSION', value: params.VERSION),
+                            string(name: 'TARGET', value: 'staging')
+                        ]
+                    }
+                }
+            }
+        }
+
+        stage('Release') {
+            when {
+                branch 'main'
+                expression { params.BUILD_TYPE == 'Release' }
+            }
+            steps {
+                sh "./gradlew release -Pversion=\${params.VERSION}"
+            }
+        }
+    }
+
+    post {
+        failure {
+            echo "Tell #releases: \${currentBuild.fullDisplayName} failed"
+        }
+    }
+}
+`;
+
+const deployStaging = `pipeline {
+    agent any
+
+    parameters {
+        string(name: 'VERSION', defaultValue: '', description: 'Image tag to deploy')
+        choice(name: 'TARGET', choices: ['staging', 'production'], description: 'Where to deploy')
+    }
+
+    stages {
+        stage('Validate') {
+            steps {
+                script {
+                    if (!params.VERSION) {
+                        error 'VERSION is required'
+                    }
+                }
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh "helm upgrade --install shop-api charts/shop-api -n \${params.TARGET} --set image.tag=\${params.VERSION}"
+            }
+        }
+        stage('Smoke test') {
+            steps {
+                sh "curl -fsS https://\${params.TARGET}.shop.example.com/health"
+            }
+        }
+    }
+}
+`;
+
+const chainContexts = [
+  { name: 'Push to main', kind: 'branch', branch: 'main', changedFiles: ['src/App.java'] },
+  { name: 'Manual: PreRelease', kind: 'branch', branch: 'main', cause: 'user', params: { BUILD_TYPE: 'PreRelease' } },
+  { name: 'PreRelease, IT fails', kind: 'branch', branch: 'main', cause: 'user', params: { BUILD_TYPE: 'PreRelease' }, mocks: [{ match: 'integrationTest', exitCode: 1, stdout: 'CheckoutIT > pays with a saved card FAILED' }] },
+  { name: 'Manual: Release', kind: 'branch', branch: 'main', cause: 'user', params: { BUILD_TYPE: 'Release' } },
+];
+
 export const EXAMPLES = [
   { id: 'multibranch', title: 'Build, test, deploy (multibranch)', blurb: 'Push, PR, tag and nightly builds of one multibranch pipeline: parallel tests, a Docker image, and deploys gated by when.', tag: 'Declarative', hue: '#7c93ff', source: multibranch, contexts: null },
   { id: 'monorepo', title: 'Monorepo: changeset and changelog', blurb: 'Build only what changed: changeset, changelog and beforeAgent, including the first build of a branch, which has no changeset.', tag: 'Declarative', hue: '#3fcf8e', source: monorepo, contexts: monorepoContexts },
   { id: 'matrix', title: 'Matrix build with excludes', blurb: 'Six platform × JDK cells minus an exclude, a per-cell when, and a Windows-only smoke test that fails.', tag: 'Matrix', hue: '#5aa9ff', source: matrix, contexts: matrixContexts },
   { id: 'params', title: 'Parameters, retry, triggeredBy', blurb: "Build parameters, triggeredBy 'TimerTrigger', a stage retry that recovers from a flaky test, and input validation that fails the build.", tag: 'Parameters', hue: '#f5b041', source: params, contexts: paramsContexts },
+  { id: 'chain', title: 'Pre-release: one pipeline starts another', blurb: 'A BUILD_TYPE parameter decides: main builds, then starts the prerelease branch, which hands the release candidate to a separate deploy job.', tag: 'Downstream', hue: '#2dd4bf', source: chain, jobs: [{ name: 'deploy-staging', source: deployStaging }], contexts: chainContexts },
   { id: 'scripted', title: 'Scripted pipeline (node / if / loops)', blurb: 'node, if/else, try/catch and a loop of stages. A stage that never ran says which if was false.', tag: 'Scripted', hue: '#c58bff', source: scripted, contexts: scriptedContexts },
   { id: 'secrets', title: 'Credentials and input', blurb: 'credentials() and withCredentials: the Groovy-interpolation warning Jenkins prints, and an input step that holds an executor.', tag: 'Security', hue: '#ff6b6b', source: secrets, contexts: null },
   { id: 'mistakes', title: 'Common mistakes (syntax checks)', blurb: 'The errors Jenkins rejects most often, each with the message the validator prints and a hint on how to fix it.', tag: 'Syntax checks', hue: '#9ba1aa', source: mistakes, contexts: null },

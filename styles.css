@@ -460,3 +460,67 @@ body.running .run-progress { background: var(--accent-soft); }
 body.embed .top { display: none; }
 body.embed .layout { padding: 10px; gap: 10px; }
 .tabs .run-ctl { margin-left: 12px; padding: 5px 0; }
+
+/* ---------- Jenkinsfile tabs (the main file and the jobs build job: can start) */
+.files { display: flex; align-items: center; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; flex: 0 1 auto; }
+.file-tab {
+  display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border-radius: 6px; cursor: pointer;
+  font-family: var(--mono); font-size: 12.5px; color: var(--muted); white-space: nowrap; flex: none; border: 1px solid transparent;
+}
+.file-tab:hover { background: var(--panel-2); color: var(--text); }
+.file-tab.active { color: var(--text); font-weight: 600; background: var(--panel-2); border-color: var(--border); }
+.file-tab:focus-visible, .file-add:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.file-bad { width: 7px; height: 7px; border-radius: 50%; background: var(--fail); flex: none; }
+.file-x { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 0 0 2px; font-size: 14px; line-height: 1; }
+.file-x:hover { color: var(--fail); }
+.file-add { border: 1px dashed var(--border-strong); background: transparent; color: var(--muted); border-radius: 6px; height: 24px; padding: 0 8px; font-size: 12px; cursor: pointer; flex: none; margin-left: 4px; }
+.file-add:hover { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- Build with Parameters */
+.params-bar { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-bottom: 1px solid var(--border); background: var(--panel-2); flex-wrap: wrap; }
+.params-label { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.pfs { display: flex; gap: 6px 12px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.pf { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; }
+.pf label { font-family: var(--mono); color: var(--muted); }
+.pf input[type="text"], .pf input[type="password"], .pf select {
+  height: 26px; border: 1px solid var(--border-strong); border-radius: 6px; background: var(--panel); color: var(--text);
+  font: inherit; font-family: var(--mono); font-size: 12.5px; padding: 0 6px; max-width: 170px;
+}
+.pf input[type="text"], .pf input[type="password"] { width: 120px; }
+.pf input:focus-visible, .pf select:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.pf.set label { color: var(--accent); font-weight: 600; }
+.pf.set input[type="text"], .pf.set input[type="password"], .pf.set select { border-color: var(--accent); background: var(--accent-soft); }
+.pf-reset { border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 0 2px; font-size: 13px; visibility: hidden; }
+.pf.set .pf-reset { visibility: visible; }
+.pf-reset:hover { color: var(--accent); }
+.params-note { font-size: 11.5px; color: var(--faint); }
+
+/* ---------- builds started with build job: */
+#graph .run-block + .run-block { border-top: 1px dashed var(--border-strong); }
+.run-block.ds { margin-left: calc(var(--depth) * 18px); }
+.run-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px 0; font-size: 12.5px; flex-wrap: wrap; position: sticky; left: 0; max-width: calc(100vw - 80px); }
+.run-block.stub .run-head { padding-bottom: 8px; }
+.run-block.focus .run-title { color: var(--accent); }
+.run-title { border: 0; background: transparent; padding: 0; font: inherit; font-weight: 600; font-family: var(--mono); color: var(--text); cursor: pointer; }
+.run-title:hover { text-decoration: underline; }
+.run-title.static { cursor: default; text-decoration: none; }
+.run-via { color: var(--muted); }
+.run-via .mono { font-family: var(--mono); font-size: 11.5px; }
+.run-file { font-family: var(--mono); font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--border); color: var(--muted); }
+.ds-arrow { color: var(--accent); font-weight: 700; }
+.badge.QUEUED { background: var(--skip-soft); color: var(--muted); }
+.badge.RUNNING { background: var(--accent-soft); color: var(--accent); }
+.ds-count { font-size: 11px; color: var(--accent); font-weight: 600; }
+.details .in-build { margin: 4px 0 0; font-size: 12.5px; }
+.cm .cm-sep th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); padding-top: 14px; }
+.log-chain { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); overflow-x: auto; flex: none; }
+@media (max-width: 720px) {
+  .pf input[type="text"], .pf input[type="password"] { width: 96px; }
+  .params-note { display: none; }
+}
+.pane-head .chip, .run-btn, .run-summary > span { white-space: nowrap; }
+.pane-head .validity { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tabs .tab, .tabs .run-ctl { flex: none; }
+.run-summary { min-width: 0; overflow: hidden; }
+.run-summary > span:first-child { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.graph.chain { max-height: 68%; }

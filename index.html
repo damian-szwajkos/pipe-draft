@@ -90,7 +90,7 @@
         <h2 class="eyebrow" id="band-title">What it understands</h2>
         <ul class="chips" role="list" style="list-style:none;margin:0;padding:0">
           <li class="chip">stages</li><li class="chip">when</li><li class="chip">parallel</li><li class="chip">matrix</li>
-          <li class="chip">post</li><li class="chip">input</li><li class="chip">parameters</li><li class="chip">credentials</li>
+          <li class="chip">post</li><li class="chip">input</li><li class="chip">parameters</li><li class="chip">build job</li><li class="chip">credentials</li>
           <li class="chip">retry &amp; timeout</li><li class="chip">catchError</li><li class="chip">scripted node { }</li>
         </ul>
       </div>
@@ -221,6 +221,38 @@ a1b2c3d
             </div>
           </article>
 
+          <!-- (e) parameters -->
+          <article class="feat" data-reveal>
+            <div class="feat-vis">
+              <div class="pform" aria-hidden="true">
+                <div class="pform-h">Build with Parameters · <b>shop-api » main</b></div>
+                <div class="pform-r set"><span>BUILD_TYPE</span><em>PreRelease ▾</em></div>
+                <div class="pform-r"><span>VERSION</span><em>1.4.0</em></div>
+                <div class="pform-r"><span>DEPLOY_STAGING</span><em class="tick">✓</em></div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>Build with Parameters</h3>
+              <p>The <code>parameters</code> block becomes a form: dropdowns for choices, checkboxes for booleans. Change a value and press Run to see which stages it switches on.</p>
+            </div>
+          </article>
+
+          <!-- (f) downstream builds -->
+          <article class="feat" data-reveal style="--d:60ms">
+            <div class="feat-vis">
+              <div class="chainv" aria-hidden="true">
+                <div class="cv-r"><span class="cv-n">shop-api » main #42</span><span class="cv-s"><i></i><i></i><i class="go"></i></span><b>SUCCESS</b></div>
+                <div class="cv-r d1"><span class="cv-n"><u>↳</u> shop-api » prerelease #45</span><span class="cv-s"><i></i><i></i><i class="go"></i></span><b>SUCCESS</b></div>
+                <div class="cv-r d2"><span class="cv-n"><u>↳</u> deploy-staging #76</span><span class="cv-s"><i></i><i></i><i></i></span><b>SUCCESS</b></div>
+                <div class="cv-note">build job: "shop-api/prerelease" · parameters: VERSION=1.4.0-rc.42</div>
+              </div>
+            </div>
+            <div class="feat-copy">
+              <h3>One pipeline starts another</h3>
+              <p>A <code>build job:</code> step runs the build it starts: another branch of the same Jenkinsfile, or a separate job you add. Parameters are passed along and checked, and a failure comes back up the chain.</p>
+            </div>
+          </article>
+
           <article class="feat sm" data-reveal>
             <div class="feat-vis">
               <div class="mini" aria-hidden="true">
@@ -234,7 +266,7 @@ a1b2c3d
             </div>
             <div class="feat-copy">
               <h3>Shareable in a link</h3>
-              <p>The Jenkinsfile and its run contexts are compressed into the URL itself. Paste it in a review or a ticket.</p>
+              <p>The Jenkinsfiles and their run contexts are compressed into the URL itself. Paste it in a review or a ticket.</p>
             </div>
           </article>
 

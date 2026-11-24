@@ -608,6 +608,8 @@ class ModelBuilder {
       if (!Array.isArray(ch) || !ch.length) {
         if (!quiet) this.err("choice needs choices: choices: ['a', 'b']", pc.head);
         ch = [''];
+        // computed at runtime (a variable, .join('\n') ...): the allowed values are unknown here
+        p.dynamicChoices = true;
       }
       p.choices = ch.map(String);
       p.default = p.choices[0];
@@ -719,7 +721,8 @@ class ModelBuilder {
     const out = [];
     const seen = new Set();
     this.walkCalls(this.program.body, (c) => {
-      if (['booleanParam', 'string', 'choice', 'text', 'password'].includes(c.name) && c.named.name && !c.named.variable) {
+      // `string(name: 'X', value: 'y')` passes a value to `build job:`; definitions use defaultValue
+      if (['booleanParam', 'string', 'choice', 'text', 'password'].includes(c.name) && c.named.name && !c.named.variable && !c.named.value) {
         const p = this.paramFromCall(c, true);
         if (p && !seen.has(p.name)) { seen.add(p.name); out.push(p); }
       }

@@ -8,13 +8,60 @@ import { buildModel, literal } from './model.js';
 import { Interp, GClosure, GError, StepFailure, toStr, truthy, gEquals, isMap } from './interp.js';
 import { evaluateWhen, describeWhen, failingLeaf } from './conditions.js';
 import { POST_CONDITIONS, NEEDS_NODE } from './catalog.js';
-import { normalizeContext, contextEnv, contextCauses } from './contexts.js';
+import { normalizeContext, contextEnv, contextCauses, jobFullName, jobDisplayName } from './contexts.js';
+import { decode } from './jobs.js';
 
 const ORDER = ['SUCCESS', 'UNSTABLE', 'FAILURE', 'NOT_BUILT', 'ABORTED'];
 const worse = (a, b) => (ORDER.indexOf(b) > ORDER.indexOf(a) ? b : a);
 const STATUS = { SUCCESS: 'success', UNSTABLE: 'unstable', FAILURE: 'failure', ABORTED: 'aborted', NOT_BUILT: 'not-run' };
 const SECRET_RE = /([^]*)/g;
+// Downstream builds deeper than this are mocked instead of simulated.
+const MAX_CHAIN = 5;
+// ...and a context simulates at most this many builds in all (a fan-out that starts itself grows fast).
+const MAX_BUILDS = 40;
 const UNIT = { SECONDS: 1, MINUTES: 60, HOURS: 3600, DAYS: 86400, MILLISECONDS: 0.001, NANOSECONDS: 1e-9, MICROSECONDS: 1e-6 };
+
+const validAnalysis = (an) => !!(an && an.ok && an.model && !an.diagnostics.some((d) => d.severity === 'error'));
+
+/**
+ * Stop a downstream build at simulated time `cutAbs` (from the start of the root build):
+ * Jenkins aborts the build a `build` step waits for when that step is interrupted.
+ */
+function abortRun(run, cutAbs, why) {
+  const cut = Math.max(0, cutAbs - (run.offset || 0));
+  if (cut >= run.duration) return false;
+  run.result = 'ABORTED';
+  run.duration = cut;
+  for (const s of Object.values(run.stages)) {
+    if (s.start == null) continue;
+    if (s.start >= cut) {
+      s.status = 'not-run';
+      s.reason = 'not reached: the build was aborted first';
+      s.start = null;
+      s.end = null;
+      s.spans = undefined;
+    } else if (s.end == null || s.end > cut) {
+      s.status = 'aborted';
+      s.reason = `aborted: ${why}`;
+      s.end = cut;
+      if (s.spans) s.spans = s.spans.filter(([a]) => a < cut).map(([a, b]) => [a, Math.min(b, cut)]);
+    }
+  }
+  run.log = run.log.filter((l) => l.t <= cut && !/^Finished:/.test(l.text));
+  run.log.push({ text: `Aborted by upstream: ${why}`, kind: 'error', stage: null, t: cut }, { text: 'Finished: ABORTED', kind: 'error', stage: null, t: cut });
+  for (const st of run.steps) if (st.t >= cut) st.status = 'not-run';
+  for (const d of run.downstream) {
+    if (d.offset >= cutAbs) {
+      d.result = 'NOT_BUILT';
+      d.error = 'not started: the build that starts it was aborted first';
+      d.run = null;
+      d.mocked = true;
+      d.mockedBy = 'aborted';
+    } else if (d.run && d.wait && abortRun(d.run, cutAbs, why)) d.result = 'ABORTED';
+  }
+  run.firstError = run.firstError || { message: 'Aborted by upstream', cls: 'org.jenkinsci.plugins.workflow.steps.FlowInterruptedException' };
+  return true;
+}
 
 class SkipSignal { constructor(reason, tree) { this.reason = reason; this.tree = tree; } }
 
@@ -78,8 +125,13 @@ export function flattenView(tree, depth = 0, out = []) {
   return out;
 }
 
-export function simulate(analysis, context) {
-  const run = new Run(analysis, context);
+/**
+ * Simulate one build. `opts.resolveJob(name, ctx)` finds the Jenkinsfile a
+ * `build job: name` step starts (see makeJobResolver); without it, downstream
+ * builds are mocked.
+ */
+export function simulate(analysis, context, opts = {}) {
+  const run = new Run(analysis, context, opts);
   return run.execute();
 }
 
@@ -131,11 +183,20 @@ class Env {
 // ------------------------------------------------------------------ the run
 
 class Run {
-  constructor(an, context) {
+  constructor(an, context, opts = {}) {
     this.an = an;
     this.model = an.model;
     this.text = an.text;
     this.ctx = normalizeContext(context);
+    this.opts = opts;
+    this.depth = opts.depth || 0;
+    // Jobs on the way to this run (upstream first), to stop a chain that triggers itself.
+    this.chain = [...(opts.chain || []), jobFullName(this.ctx)];
+    // shared by every build of the chain: build numbers per job, and how many builds were simulated
+    this.numbers = opts.numbers || new Map([[jobFullName(this.ctx), this.ctx.buildNumber]]);
+    this.budget = opts.budget || { builds: 0 };
+    this.branchLabel = this.ctx.kind === 'pr' ? `PR-${this.ctx.pr.id}` : this.ctx.branchName ?? this.ctx.branch;
+    this.wsName = this.ctx.standalone ? this.ctx.job.replace(/\//g, '_') : `${this.ctx.job}_${this.ctx.branchName}`;
     this.result = 'SUCCESS';
     this.resultSet = false;
     this.log = [];
@@ -228,7 +289,7 @@ class Run {
     return { exitCode: 0, stdout: null, rule: null, duration: null };
   }
 
-  sha() { return (hashStr(this.ctx.branchName + this.ctx.buildNumber) + hashStr(this.ctx.branchName) + hashStr(String(this.ctx.buildNumber)) + hashStr('x' + this.ctx.branchName) + hashStr('y')).slice(0, 40); }
+  sha() { return (hashStr(this.branchLabel + this.ctx.buildNumber) + hashStr(this.branchLabel) + hashStr(String(this.ctx.buildNumber)) + hashStr('x' + this.branchLabel) + hashStr('y')).slice(0, 40); }
 
   defaultStdout(cmd) {
     const c = cmd.trim();
@@ -309,9 +370,9 @@ class Run {
           case 'number': return ctx.buildNumber;
           case 'id': return String(ctx.buildNumber);
           case 'displayName': return run.displayName ?? `#${ctx.buildNumber}`;
-          case 'fullDisplayName': return `${ctx.job} » ${ctx.branchName} #${ctx.buildNumber}`;
-          case 'projectName': return ctx.branchName;
-          case 'fullProjectName': return `${ctx.job}/${ctx.branchName}`;
+          case 'fullDisplayName': return `${jobDisplayName(ctx)} #${ctx.buildNumber}`;
+          case 'projectName': return ctx.standalone ? ctx.job.split('/').pop() : ctx.branchName;
+          case 'fullProjectName': return jobFullName(ctx);
           case 'description': return run.description ?? null;
           case 'previousBuild': return prev ? wrapper(prev, ctx.buildNumber - 1) : null;
           case 'previousCompletedBuild': return prev ? wrapper(prev, ctx.buildNumber - 1) : null;
@@ -354,7 +415,7 @@ class Run {
     };
     const scm = {
       __special: 'hudson.plugins.git.GitSCM',
-      branches: [{ name: ctx.kind === 'pr' ? `PR-${ctx.pr.id}` : ctx.branchName }],
+      branches: [{ name: run.branchLabel }],
       userRemoteConfigs: [{ url: `https://github.com/acme/${ctx.job}.git`, credentialsId: 'github' }],
       extensions: [],
       __str: () => 'hudson.plugins.git.GitSCM@scm',
@@ -413,6 +474,214 @@ class Run {
     };
   }
 
+  /**
+   * A waited-for downstream build outlives the step that started it when that
+   * step was interrupted (a timeout, failFast, the pipeline timeout): Jenkins
+   * aborts it then. The child ran to the end in the simulation, so cut it here.
+   */
+  cutInterruptedBuilds() {
+    const base = this.opts.offset || 0;
+    for (const d of this.downstream) {
+      if (!d.run || !d.wait) continue;
+      const start = d.offset - base;
+      const end = start + d.run.duration;
+      let cut = this.cutoff != null ? this.cutoff : Infinity;
+      const sr = d.stage ? this.stages.get(d.stage) : null;
+      if (sr && sr.end != null) cut = Math.min(cut, sr.end);
+      else if (!sr) cut = Math.min(cut, this.clock);
+      if (cut >= end - 1e-9) continue;
+      if (abortRun(d.run, base + cut, `the upstream step that waited for it was interrupted at ${fmtDur(cut)}`)) {
+        d.result = 'ABORTED';
+        for (const l of this.log) {
+          if (l.t > cut && l.text.includes(`Build ${d.display} #${d.number} completed:`)) {
+            l.text = `${this.prefix}Aborting ${d.display} #${d.number}: the build step was interrupted`;
+            l.kind = 'error';
+            l.t = cut;
+          }
+        }
+      }
+    }
+  }
+
+  // ---------------- downstream builds
+  /**
+   * `build job: '...'`: start another job. When the workspace has a Jenkinsfile
+   * for it (resolveJob), that build is simulated for real, as a child run that
+   * starts at this point on the clock. Otherwise it is mocked, as before.
+   */
+  buildJob(a) {
+    const job = str(a.named.job ?? a.args[0]);
+    const wait = a.named.wait !== false;
+    const propagate = a.named.propagate !== false;
+    this.pl('build');
+    const passed = (Array.isArray(a.named.parameters) ? a.named.parameters : [])
+      .filter((p) => p && typeof p === 'object' && p.name != null)
+      .map((p) => ({ name: str(p.name), value: p.kind === 'booleanParam' ? truthy(p.value) : str(p.value), kind: p.kind || 'string' }));
+    const m = this.mockFor(`build ${job}`);
+    let target = m.rule == null && this.opts.resolveJob ? this.opts.resolveJob(job, this.ctx) : null;
+    let stopped = null;
+    let mockedBy = m.rule != null ? 'rule' : 'missing';
+    if (target && !target.notFound) {
+      if (this.chain.includes(target.fullName)) { stopped = `"${target.fullName}" is already running further up this chain`; mockedBy = 'loop'; }
+      else if (this.depth >= MAX_CHAIN) { stopped = `the chain is ${MAX_CHAIN + 1} builds deep`; mockedBy = 'limit'; }
+      else if (this.budget.builds >= MAX_BUILDS) { stopped = `this context already simulated ${MAX_BUILDS} builds`; mockedBy = 'limit'; }
+    }
+    if (stopped) {
+      this.warnOnce(`loop:${job}`, `build job: '${job}' was not simulated: ${stopped}`, a.node,
+        'In Jenkins this would keep starting builds. The simulation mocks this build as SUCCESS instead.');
+      target = null;
+    }
+    const notFound = target?.notFound ? target : null;
+    if (notFound) target = null;
+    const tctx = target ? this.downstreamContext(target, passed) : null;
+    const display = tctx ? jobDisplayName(tctx) : job.replace(/^\/+/, '').split('/').map(decode).join(' » ');
+    const number = tctx ? tctx.buildNumber : this.nextNumber(job);
+    const rec = this.record('build', a.node, `build ${job}${wait ? '' : ' (no wait)'}`, { kind: 'downstream', mockRule: m.rule, ds: this.downstream.length });
+    const entry = {
+      job, display, wait, propagate, number, result: 'SUCCESS', s: a.node.s, e: a.node.e, stage: this.cur?.id || null,
+      params: passed.map((p) => `${p.name}=${p.value}`), resolved: null, run: null, offset: (this.opts.offset || 0) + this.clock,
+      mocked: !target, mockedBy: target ? null : mockedBy, duration: 0,
+    };
+    this.downstream.push(entry);
+    if (notFound) {
+      entry.result = 'NOT_BUILT';
+      entry.mockedBy = 'notfound';
+      entry.error = `No item named ${job} found`;
+      rec.status = 'failed';
+      throw new StepFailure(`No item named ${job} found`, 'FAILURE', 'hudson.AbortException', { hint: notFound.hint });
+    }
+    if (!target && m.rule == null && this.opts.resolveJob && !stopped) {
+      this.warnOnce(`ds:${job}`, `No Jenkinsfile for job "${job}" in this workspace: the build is mocked as SUCCESS`, a.node,
+        `Add a job named "${job}" (+ Job above the editor), or name a branch of this pipeline: build job: "${this.ctx.job}/<branch>".`);
+    }
+    if (target && validAnalysis(target.analysis)) {
+      try {
+        this.checkPassedParams(target, passed, job, a.node);
+      } catch (e) {
+        entry.result = 'NOT_BUILT';
+        entry.error = e.message;
+        rec.status = 'failed';
+        throw e;
+      }
+    }
+    this.out(`Scheduling project: ${display}`, 'info');
+
+    let result;
+    if (target) {
+      entry.resolved = target.standalone ? 'job' : 'branch';
+      this.budget.builds++;
+      const child = this.runDownstream(target, tctx, entry.offset);
+      entry.duration = child.duration;
+      entry.run = child;
+      result = child.result;
+      if (wait) {
+        this.out(`Starting building: ${display} #${number}`, 'info');
+        this.clock += child.duration;
+        rec.dur = child.duration;
+      }
+    } else {
+      result = m.exitCode ? 'FAILURE' : 'SUCCESS';
+      if (wait) {
+        this.out(`Starting building: ${display} #${number}`, 'info');
+        this.clock += m.duration ?? 60;
+        rec.dur = m.duration ?? 60;
+        entry.duration = rec.dur;
+      }
+    }
+    entry.result = result;
+    if (!wait) return null;
+    this.out(`Build ${display} #${number} completed: ${result}`, result === 'SUCCESS' ? 'info' : 'error');
+    if (result !== 'SUCCESS' && propagate) {
+      rec.status = result === 'UNSTABLE' ? 'warn' : 'failed';
+      throw new StepFailure(`${display} #${number} completed with status ${result} (propagate: false to ignore)`, ['UNSTABLE', 'ABORTED', 'NOT_BUILT'].includes(result) ? result : 'FAILURE');
+    }
+    if (result !== 'SUCCESS') rec.status = 'warn';
+    const vars = entry.run ? { ...entry.run.env } : {};
+    return {
+      __special: 'RunWrapper', result, number,
+      __str: () => `#${number}`,
+      __getProp: (n) => ({
+        result, number, currentResult: result, id: String(number), displayName: `#${number}`, fullDisplayName: `${display} #${number}`,
+        projectName: display.split(' » ').pop(), fullProjectName: tctx ? jobFullName(tctx) : job,
+        absoluteUrl: tctx ? contextEnv(tctx).BUILD_URL : `https://jenkins.example.com/job/${job}/${number}/`,
+        buildVariables: vars, duration: Math.round((entry.run?.duration ?? rec.dur) * 1000),
+      }[n] ?? null),
+      __call: (name) => (name === 'getBuildVariables' ? vars : undefined),
+    };
+  }
+
+  /** The run context of a downstream build: started by this build, with the parameters it passes. */
+  downstreamContext(target, passed) {
+    const n = this.nextNumber(target.fullName);
+    return normalizeContext({
+      id: `${this.ctx.id}>${target.fullName}#${n}`,
+      name: target.fullName,
+      kind: 'branch',
+      branch: target.branch || 'main',
+      standalone: target.standalone,
+      job: target.job,
+      cause: 'upstream',
+      upstream: { job: jobFullName(this.ctx), number: this.ctx.buildNumber },
+      params: Object.fromEntries(passed.map((p) => [p.name, p.value])),
+      mocks: this.ctx.mocks,
+      user: this.ctx.user,
+      input: this.ctx.input,
+      previousResult: 'SUCCESS',
+      commits: this.ctx.commits,
+      changedFiles: [],
+      missingCredentials: this.ctx.missingCredentials,
+      buildNumber: n,
+    });
+  }
+
+  /** The next build number of a job: stable for its first build in a chain, then counting up as in Jenkins. */
+  nextNumber(fullName) {
+    const n = this.numbers.has(fullName) ? this.numbers.get(fullName) + 1 : 10 + (parseInt(hashStr(fullName), 16) % 80);
+    this.numbers.set(fullName, n);
+    return n;
+  }
+
+  /** Warn about parameters Jenkins would drop; fail on a value a choice parameter does not allow. */
+  checkPassedParams(target, passed, job, node) {
+    const defs = target.analysis?.model?.params;
+    if (!defs) return;
+    // values a choice allows are only checked when the choices are written out
+    for (const p of passed) {
+      const d = defs.find((x) => x.name === p.name);
+      if (!d) {
+        this.warnOnce(`undeclared:${job}:${p.name}`, `Parameter "${p.name}" is not defined by job "${target.fullName}": Jenkins drops it, so the downstream build never sees it`, node,
+          defs.length ? `That job defines: ${defs.map((x) => x.name).join(', ')}.` : 'That job has no parameters { } block.');
+      } else if (d.type === 'choice' && !d.dynamicChoices && p.kind !== 'booleanParam' && !d.choices.includes(String(p.value))) {
+        throw new StepFailure(`Illegal choice for parameter ${p.name}: ${p.value}`, 'FAILURE', 'java.lang.IllegalArgumentException',
+          { hint: `"${target.fullName}" allows: ${d.choices.join(', ')}.` });
+      }
+    }
+  }
+
+  runDownstream(target, tctx, offset) {
+    const an = target.analysis;
+    let child;
+    if (!validAnalysis(an)) {
+      // Jenkins compiles the Jenkinsfile first: the build fails before any stage runs.
+      const causes = contextCauses(tctx);
+      const errs = an ? an.diagnostics.filter((d) => d.severity === 'error') : [];
+      const lines = [
+        ...causes.map((c) => ({ text: c.text, kind: 'info' })),
+        { text: 'org.codehaus.groovy.control.MultipleCompilationErrorsException: startup failed:', kind: 'error' },
+        ...errs.slice(0, 5).map((d) => ({ text: `WorkflowScript: ${an.lines.line(d.s)}: ${d.message}`, kind: 'error' })),
+        { text: 'Finished: FAILURE', kind: 'error' },
+      ].map((l) => ({ ...l, stage: null, t: 0 }));
+      child = {
+        result: 'FAILURE', stages: {}, log: lines, steps: [], hits: new Map(), branches: new Map(), warnings: [],
+        firstError: { message: errs[0]?.message || 'The Jenkinsfile does not compile', cls: 'org.codehaus.groovy.control.MultipleCompilationErrorsException' },
+        duration: 1, postRuns: [], downstream: [], causes, context: tctx, params: {}, env: contextEnv(tctx), invalid: true,
+      };
+    } else {
+      child = new Run(an, tctx, { resolveJob: this.opts.resolveJob, depth: this.depth + 1, chain: this.chain, offset, numbers: this.numbers, budget: this.budget }).execute();
+    }
+    return Object.assign(child, { job: jobFullName(tctx), display: jobDisplayName(tctx), file: target.file, offset, number: tctx.buildNumber, depth: this.depth + 1 });
+  }
+
   missingContext(step) {
     return new StepFailure(`Required context class hudson.FilePath is missing\nPerhaps you forgot to surround the ${step} step with a step that provides this, such as: node`,
       'FAILURE', 'org.jenkinsci.plugins.workflow.steps.MissingContextVariableException',
@@ -434,6 +703,7 @@ class Run {
     }
     if (this.model.mode === 'scripted') this.pl('End of Pipeline');
     this.markUnreached();
+    this.cutInterruptedBuilds();
     if (this.firstError) {
       const m = this.firstError;
       this.out(m.cls && !m.cls.endsWith('AbortException') && !(m.cls.endsWith('FlowInterruptedException')) ? `${m.cls}: ${m.message}` : `ERROR: ${m.message}`, 'error');
@@ -455,6 +725,11 @@ class Run {
       context: ctx,
       params: this.params,
       env: this.env.layers[0],
+      job: jobFullName(ctx),
+      display: jobDisplayName(ctx),
+      offset: this.opts.offset || 0,
+      depth: this.depth,
+      number: ctx.buildNumber,
     };
   }
 
@@ -588,7 +863,7 @@ class Run {
     if (agent.type === 'docker' || agent.type === 'dockerfile') {
       const image = agent.image ? toStr(this.interp.eval(agent.image, scope)) : 'Dockerfile';
       desc = agent.type === 'docker' ? `docker ${image}` : 'dockerfile';
-      this.out(`Running on ${name} in /home/jenkins/workspace/${this.ctx.job}_${this.ctx.branchName}`, 'info');
+      this.out(`Running on ${name} in /home/jenkins/workspace/${this.wsName}`, 'info');
       this.out(agent.type === 'docker' ? `+ docker pull ${image}` : '+ docker build -t pipeline-agent -f Dockerfile .', 'cmd');
       this.clock += agent.type === 'docker' ? 8 : 40;
     } else if (agent.type === 'kubernetes') {
@@ -597,11 +872,11 @@ class Run {
       this.clock += 12;
     } else {
       if (label) desc = `label ${label}`;
-      this.out(`Running on ${name} in /home/jenkins/workspace/${this.ctx.job}_${this.ctx.branchName}`, 'info');
+      this.out(`Running on ${name} in /home/jenkins/workspace/${this.wsName}`, 'info');
       this.clock += 2;
     }
     this.nodeDepth++;
-    this.env.push({ NODE_NAME: name, WORKSPACE: `/home/jenkins/workspace/${this.ctx.job}_${this.ctx.branchName}`, NODE_LABELS: label || name });
+    this.env.push({ NODE_NAME: name, WORKSPACE: `/home/jenkins/workspace/${this.wsName}`, NODE_LABELS: label || name });
     return desc;
   }
   exitAgent() { this.nodeDepth--; this.env.pop(); }
@@ -644,9 +919,9 @@ class Run {
           this.pl('stage');
           this.pl('{ (Declarative: Checkout SCM)');
           this.pl('checkout');
-          this.out(`Checking out Revision ${this.sha()} (${this.ctx.kind === 'pr' ? `PR-${this.ctx.pr.id}` : this.ctx.branchName})`, 'info');
+          this.out(`Checking out Revision ${this.sha()} (${this.branchLabel})`, 'info');
           this.env.setGlobal('GIT_COMMIT', this.sha());
-          this.env.setGlobal('GIT_BRANCH', this.ctx.kind === 'pr' ? `PR-${this.ctx.pr.id}` : this.ctx.branchName);
+          this.env.setGlobal('GIT_BRANCH', this.branchLabel);
           this.clock += 3;
           this.pl('}');
         }
@@ -655,6 +930,7 @@ class Run {
       this.runStages(P.stages, scope, flow, '');
       if (timeoutSec != null && this.clock > timeoutSec) {
         const deadline = timeoutSec;
+        this.cutoff = deadline;
         this.out('Timeout has been exceeded', 'error');
         for (const sr of this.stages.values()) {
           if (sr.start != null && sr.start >= deadline && sr.status !== 'skipped') { sr.status = 'aborted'; sr.reason = 'aborted: the pipeline timeout had already expired'; }
@@ -1218,7 +1494,7 @@ const STEPS = {
     const label = target && target.__special === 'hudson.plugins.git.GitSCM' ? 'checkout scm' : `checkout ${str(target).slice(0, 60)}`;
     this.record('checkout', a.node, label, { kind: 'scm' });
     const sha = this.sha();
-    const br = this.ctx.kind === 'pr' ? `PR-${this.ctx.pr.id}` : this.ctx.branchName;
+    const br = this.branchLabel;
     this.out(`The recommended git tool is: NONE\nCloning the remote Git repository\nChecking out Revision ${sha} (${br})\nCommit message: "${(this.ctx.commits[0] || '').split('\n')[0]}"`, 'info');
     this.env.setGlobal('GIT_COMMIT', sha);
     this.env.setGlobal('GIT_BRANCH', br);
@@ -1474,28 +1750,7 @@ const STEPS = {
   gitlabCommitStatus: wrapper('gitlabCommitStatus'),
   updateGitlabCommitStatus: notify('updateGitlabCommitStatus'),
   notifyBitbucket: notify('notifyBitbucket'),
-  build(a) {
-    const job = str(a.named.job ?? a.args[0]);
-    const wait = a.named.wait !== false;
-    const propagate = a.named.propagate !== false;
-    this.pl('build');
-    const m = this.mockFor(`build ${job}`);
-    const result = m.exitCode ? 'FAILURE' : 'SUCCESS';
-    const number = 17;
-    const rec = this.record('build', a.node, `build ${job}${wait ? '' : ' (no wait)'}`, { kind: 'downstream' });
-    this.downstream.push({ job, wait, result: wait ? result : 'QUEUED', s: a.node.s, e: a.node.e, stage: this.cur?.id || null, params: (a.named.parameters || []).map((p) => `${str(p.name)}=${str(p.value)}`) });
-    this.out(`Scheduling project: ${job}`, 'info');
-    if (!wait) return null;
-    this.out(`Starting building: ${job} #${number}`, 'info');
-    this.clock += m.duration ?? 60;
-    rec.dur = m.duration ?? 60;
-    this.out(`Build ${job} #${number} completed: ${result}`, result === 'SUCCESS' ? 'info' : 'error');
-    if (result !== 'SUCCESS' && propagate) {
-      rec.status = 'failed';
-      throw new StepFailure(`${job} #${number} completed with status ${result} (propagate: false to ignore)`, 'FAILURE');
-    }
-    return { __special: 'RunWrapper', result, number, __getProp: (n) => ({ result, number, currentResult: result, absoluteUrl: `https://jenkins.example.com/job/${job}/${number}/` }[n] ?? null) };
-  },
+  build(a) { return this.buildJob(a); },
   node(a) {
     const label = a.args.length ? str(a.args[0]) : a.named.label != null ? str(a.named.label) : null;
     const desc = this.enterAgent({ type: 'label', label: label ? { type: 'Literal', value: label, s: 0, e: 0 } : null }, a.scope);

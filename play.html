@@ -29,7 +29,7 @@
   <main class="layout">
     <section class="pane editor-pane" aria-label="Jenkinsfile editor">
       <div class="pane-head">
-        <span class="file">Jenkinsfile</span>
+        <div id="files" class="files" role="tablist" aria-label="Jenkinsfiles"></div>
         <span id="mode" class="chip"></span>
         <span id="validity" class="validity"></span>
       </div>
@@ -52,6 +52,7 @@
           <button id="ctx-suggest" class="btn small ghost" type="button" title="Add contexts that flip the conditions in this pipeline">Suggest from conditions</button>
         </div>
       </div>
+      <div id="params" class="params-bar" hidden></div>
       <div class="run-progress" id="run-progress" aria-hidden="true"><i></i></div>
       <div class="tabs" role="tablist">
         <button class="tab" data-tab="pipeline" type="button">Stages</button>
@@ -73,7 +74,7 @@
           <div id="details" class="details"></div>
         </div>
         <div id="tab-matrix" class="tab-panel"><div id="matrix" class="matrix-wrap"></div></div>
-        <div id="tab-log" class="tab-panel"><pre id="log" class="log"></pre></div>
+        <div id="tab-log" class="tab-panel"><div id="log-chain" class="log-chain" hidden></div><pre id="log" class="log"></pre></div>
       </div>
     </section>
   </main>

@@ -10,7 +10,7 @@ export const CAUSES = {
   scm: { label: 'SCM polling', cls: 'hudson.triggers.SCMTrigger$SCMTriggerCause', text: () => 'Started by an SCM change' },
   timer: { label: 'Timer (cron)', cls: 'hudson.triggers.TimerTrigger$TimerTriggerCause', text: () => 'Started by timer' },
   user: { label: 'Manual (Build with Parameters)', cls: 'hudson.model.Cause$UserIdCause', text: (c) => `Started by user ${c.user}` },
-  upstream: { label: 'Upstream job', cls: 'hudson.model.Cause$UpstreamCause', text: () => 'Started by upstream project "platform/libs" build number 211' },
+  upstream: { label: 'Upstream job', cls: 'hudson.model.Cause$UpstreamCause', text: (c) => `Started by upstream project "${c.upstream?.job || 'platform/libs'}" build number ${c.upstream?.number ?? 211}` },
   indexing: { label: 'Branch indexing', cls: 'jenkins.branch.BranchIndexingCause', text: () => 'Branch indexing' },
 };
 
@@ -19,7 +19,9 @@ export function normalizeContext(c = {}) {
   const pr = { id: 42, target: 'main', source: 'feature/login', author: 'alice', title: 'Add login page', fork: false, ...(c.pr || {}) };
   const branch = c.branch || 'main';
   const tag = c.tag || 'v1.2.0';
-  const branchName = kind === 'pr' ? `PR-${pr.id}` : kind === 'tag' ? tag : branch;
+  // A standalone pipeline job (not a branch of a multibranch project) has no BRANCH_NAME.
+  const standalone = !!c.standalone;
+  const branchName = standalone ? null : kind === 'pr' ? `PR-${pr.id}` : kind === 'tag' ? tag : branch;
   const lines = (v) => (Array.isArray(v) ? v : String(v || '').split('\n')).map((x) => x.trim()).filter(Boolean);
   return {
     id: c.id || newId(),
@@ -41,6 +43,8 @@ export function normalizeContext(c = {}) {
     buildNumber: Number(c.buildNumber) || 42,
     job: c.job || 'shop-api',
     missingCredentials: c.missingCredentials || [],
+    standalone,
+    upstream: c.upstream || null,
   };
 }
 
@@ -50,8 +54,36 @@ export function contextCauses(ctx) {
   return out;
 }
 
+/** Full Jenkins name of the job a context builds: "shop-api/main", or "deploy-staging" for a standalone job. */
+export function jobFullName(ctx) {
+  return ctx.standalone ? ctx.job : `${ctx.job}/${encodeURIComponent(ctx.branchName)}`;
+}
+
+/** The same name as Jenkins displays it: "shop-api » main". */
+export function jobDisplayName(ctx) {
+  return ctx.standalone ? ctx.job.split('/').join(' » ') : `${ctx.job.split('/').join(' » ')} » ${ctx.branchName}`;
+}
+
 export function contextEnv(ctx) {
   const n = ctx.buildNumber;
+  if (ctx.standalone) {
+    const url = `https://jenkins.example.com/${ctx.job.split('/').map((x) => `job/${encodeURIComponent(x)}/`).join('')}`;
+    return {
+      BUILD_NUMBER: String(n),
+      BUILD_ID: String(n),
+      BUILD_DISPLAY_NAME: `#${n}`,
+      JOB_NAME: ctx.job,
+      JOB_BASE_NAME: ctx.job.split('/').pop(),
+      BUILD_TAG: `jenkins-${ctx.job.replace(/\//g, '-')}-${n}`,
+      JENKINS_URL: 'https://jenkins.example.com/',
+      JOB_URL: url,
+      BUILD_URL: `${url}${n}/`,
+      RUN_DISPLAY_URL: `${url}${n}/display/redirect`,
+      EXECUTOR_NUMBER: '0',
+      HUDSON_HOME: '/var/jenkins_home',
+      CI: 'true',
+    };
+  }
   const enc = encodeURIComponent(ctx.branchName);
   const e = {
     BRANCH_NAME: ctx.branchName,

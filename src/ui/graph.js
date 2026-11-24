@@ -59,6 +59,8 @@ export function renderGraph(el, tree, run, opts) {
   const time = opts.time ?? null;
   const simTotal = opts.total ?? (run ? Math.max(run.duration, 1) : 0);
   const finished = time == null || time >= simTotal;
+  // a downstream build that has not been started yet during playback
+  const queued = time != null && time < 0;
   if (!tree || !tree.items.length) {
     el.innerHTML = `<div class="graph-empty">${invalid ? '<strong>Jenkins would reject this file.</strong> Fix the problems on the left to see the stages.' : 'No stages found. Add <code>stages { stage(\'Build\') { steps { ... } } }</code>.'}</div>`;
     return;
@@ -102,9 +104,10 @@ export function renderGraph(el, tree, run, opts) {
     if (sr.status === 'aborted') return sr.reason || 'aborted';
     if (sr.status === 'failure') return sr.reason || 'failed';
     const nsteps = sr.steps.filter((s) => !['echo'].includes(s.name)).length;
+    const ds = sr.steps.filter((s) => s.kind === 'downstream').length;
     const dur = sr.end != null && sr.start != null ? fmtDur(sr.end - sr.start) : '';
     const inst = sr.instances > 1 ? `×${sr.instances} · ` : '';
-    return `${inst}${dur}${nsteps ? ` · ${nsteps} step${nsteps === 1 ? '' : 's'}` : ''}${sr.status === 'unstable' ? ' · unstable' : ''}`;
+    return `${inst}${dur}${ds ? ` · ↳ started ${ds} build${ds === 1 ? '' : 's'}` : nsteps ? ` · ${nsteps} step${nsteps === 1 ? '' : 's'}` : ''}${sr.status === 'unstable' ? ' · unstable' : ''}`;
   };
 
   const box = (n, x, y, w, h, container) => {
@@ -217,7 +220,7 @@ export function renderGraph(el, tree, run, opts) {
     ${parts.join('')}
     ${postParts.join('')}
     <g class="g-term end ${esc(result)}${opts.celebrate && result ? ' done' : ''}"><circle cx="${endX}" cy="${mid}" r="${TERM}"/><text class="ic" x="${endX}" y="${mid + 5}" text-anchor="middle">${endIcon}</text>
-      <text x="${endX}" y="${mid + TERM + 14}" text-anchor="middle">${esc(result.toLowerCase() || (time != null ? 'running…' : 'end'))}</text></g>
+      <text x="${endX}" y="${mid + TERM + 14}" text-anchor="middle">${esc(result.toLowerCase() || (queued ? 'queued' : time != null ? 'running…' : 'end'))}</text></g>
   </svg>`;
   el.querySelectorAll('.g-node').forEach((g) => {
     g.addEventListener('click', () => onSelect(g.dataset.id));
